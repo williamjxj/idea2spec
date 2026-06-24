@@ -67,3 +67,4 @@ logs/
 
 # Local IDE (optional user overrides; keep shared .vscode/)
 .idea/
+.codegraph/

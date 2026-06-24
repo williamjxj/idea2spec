@@ -31,10 +31,29 @@ export type Project = {
   tasks?: Tasks | null;
 };
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+/** Same-origin proxy via Next.js rewrites (/api → FastAPI). Override for direct calls. */
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api";
+
+export function formatApiError(error: unknown): string {
+  if (error instanceof TypeError) {
+    return (
+      "Cannot reach the API. Start the backend with `make api` (port 8100), " +
+      "ensure `apps/web/.env.local` has BACKEND_URL if not using defaults, then restart `make web`."
+    );
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return "Request failed";
+}
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, init);
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, init);
+  } catch (error) {
+    throw new TypeError(formatApiError(error));
+  }
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || res.statusText);

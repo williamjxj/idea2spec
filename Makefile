@@ -9,7 +9,7 @@ test:
 	PYTHONPATH=. .venv/bin/pytest tests/ -q
 
 api:
-	PYTHONPATH=. .venv/bin/python -m uvicorn services.api.main:app --reload --host 0.0.0.0 --port 8000
+	PYTHONPATH=. .venv/bin/python -m uvicorn services.api.main:app --reload --host 0.0.0.0 --port 8100
 
 web:
 	cd apps/web && npm run dev

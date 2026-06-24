@@ -13,6 +13,8 @@ Idea → Business Analysis → PRD → Architecture → Tasks → Workspace
 - **LLM:** DeepSeek, Kimi, MiniMax (OpenAI-compatible APIs)
 - **Storage:** In-memory (MVP)
 
+Full stack reference (architecture, workflows, sequence diagrams): **[docs/tech-stack.md](docs/tech-stack.md)**
+
 ## Setup
 
 ### 1. Python backend
@@ -28,7 +30,7 @@ cp .env.example .env   # add your API keys
 ### 2. Run API
 
 ```bash
-PYTHONPATH=. uvicorn services.api.main:app --reload --host 0.0.0.0 --port 8000
+PYTHONPATH=. uvicorn services.api.main:app --reload --host 0.0.0.0 --port 8100
 ```
 
 ### 3. Next.js UI

@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   createProject,
   exportProject,
+  formatApiError,
   runAgent,
   type Project,
 } from "@/lib/api";
@@ -35,7 +36,7 @@ export default function ControlPanel() {
       const p = await createProject(idea.trim());
       setProject(p);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to create project");
+      setError(formatApiError(e));
     } finally {
       setLoading(null);
     }
@@ -49,7 +50,7 @@ export default function ControlPanel() {
       const p = await runAgent(project.id, agent);
       setProject(p);
     } catch (e) {
-      setError(e instanceof Error ? e.message : `Failed to run ${agent} agent`);
+      setError(formatApiError(e));
     } finally {
       setLoading(null);
     }
@@ -64,7 +65,7 @@ export default function ControlPanel() {
       setProject(result.project);
       setExportPath(result.path);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to export");
+      setError(formatApiError(e));
     } finally {
       setLoading(null);
     }
