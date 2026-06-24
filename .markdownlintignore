@@ -1,0 +1,2 @@
+# Ignore all markdown files for markdownlint (if the extension is enabled)
+**/*.md

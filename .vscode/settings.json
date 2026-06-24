@@ -1,0 +1,19 @@
+{
+  "markdownlint.run": "off",
+  "markdownlint.configFile": ".markdownlint.json",
+  "markdownlint.config": {
+    "default": false,
+    "MD034": false,
+    "MD060": false
+  },
+  "markdownlint.lintWorkspaceGlobs": [],
+  "markdown.validate.enabled": false,
+  "[markdown]": {
+    "editor.wordWrap": "on",
+    "editor.quickSuggestions": {
+      "comments": "off",
+      "strings": "off",
+      "other": "off"
+    }
+  }
+}
