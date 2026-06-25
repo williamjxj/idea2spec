@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -25,6 +27,18 @@ class Tasks(BaseModel):
     issues: list[str] = Field(default_factory=list)
 
 
+class ExportFile(BaseModel):
+    name: str
+    content: str
+
+
+class ExportArtifact(BaseModel):
+    format: str          # "markdown" | "pdf" | "html" | "mermaid"
+    type: str            # "workspace" | "business-report" | "architecture-diagram"
+    files: list[ExportFile]
+    created_at: datetime
+
+
 class Project(BaseModel):
     id: str
     idea: str
@@ -32,6 +46,9 @@ class Project(BaseModel):
     prd: PRD | None = None
     architecture: Architecture | None = None
     tasks: Tasks | None = None
+    exports: list[ExportArtifact] = Field(default_factory=list)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class ProjectState(BaseModel):
