@@ -2,12 +2,12 @@ from pathlib import Path
 
 from slugify import slugify
 
-from packages.schemas import Architecture, BusinessAnalysis, PRD, Project, Tasks
+from packages.schemas import Architecture, BusinessAnalysis, ExportArtifact, PRD, Project, Tasks
 from services.api.export import export_project_workspace
 
 
-def test_export_creates_markdown_files(tmp_path):
-    project = Project(
+def _sample_project() -> Project:
+    return Project(
         id="abc12345-0000-0000-0000-000000000001",
         idea="AI Resume SaaS",
         business_analysis=BusinessAnalysis(
@@ -28,6 +28,10 @@ def test_export_creates_markdown_files(tmp_path):
         ),
         tasks=Tasks(epics=["Auth epic"], issues=["Setup repo"]),
     )
+
+
+def test_export_creates_markdown_files(tmp_path):
+    project = _sample_project()
     out = export_project_workspace(project, tmp_path)
     assert out.is_dir()
     for name in [
@@ -40,6 +44,19 @@ def test_export_creates_markdown_files(tmp_path):
     ]:
         assert (out / name).exists()
     assert "AI Resume SaaS" in (out / "00-overview.md").read_text()
+
+
+def test_export_appends_artifact_to_project(tmp_path):
+    project = _sample_project()
+    assert len(project.exports) == 0
+    export_project_workspace(project, tmp_path)
+    assert len(project.exports) == 1
+    artifact = project.exports[0]
+    assert artifact.format == "markdown"
+    assert artifact.type == "workspace"
+    assert len(artifact.files) == 6
+    assert artifact.files[0].name == "00-overview.md"
+    assert "AI Resume SaaS" in artifact.files[0].content
 
 
 def test_slugify_fallback(tmp_path):
