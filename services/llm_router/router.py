@@ -13,6 +13,8 @@ class LLMRouterError(Exception):
 
 def _extract_json(text: str) -> dict[str, Any]:
     text = text.strip()
+    # Strip reasoning tags some models (MiniMax, DeepSeek) add before the actual output
+    text = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
     fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
     if fence:
         text = fence.group(1).strip()
