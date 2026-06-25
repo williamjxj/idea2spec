@@ -1,4 +1,10 @@
-.PHONY: install test api web cli
+.PHONY: install test api web cli db
+
+db:
+	docker run -d --name ai-project-cto-db \
+		-e POSTGRES_PASSWORD=postgres \
+		-e POSTGRES_DB=ai_project_cto \
+		-p 5432:5432 postgres:16-alpine 2>/dev/null || echo "Container already exists. Run: docker start ai-project-cto-db"
 
 install:
 	python3 -m venv .venv
