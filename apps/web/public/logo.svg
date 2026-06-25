@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 128" width="480" height="128">
+  <defs>
+    <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="brandGrad2" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+    <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#6366f1" stop-opacity="0.3"/>
+      <stop offset="50%" stop-color="#8b5cf6" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#a78bfa" stop-opacity="0.3"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background (transparent, fits dark theme) -->
+
+  <!-- === Icon: Pipeline Flow === -->
+
+  <!-- Connecting pipeline line -->
+  <path d="M 20 56 Q 50 56 56 40 Q 62 24 76 32 Q 90 40 96 24 Q 102 8 116 20 Q 130 32 136 16 Q 142 0 156 16 Q 170 32 176 20 Q 182 8 196 24 Q 210 40 216 32 Q 222 24 236 32 Q 250 40 256 28 Q 262 16 276 28" 
+        stroke="url(#lineGrad)" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+
+  <!-- Node 1: Idea (circle) -->
+  <circle cx="28" cy="56" r="14" fill="url(#brandGrad)" opacity="0.9"/>
+  <path d="M 24 56 L 32 56 M 28 52 L 28 60" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Node 2: Business Analysis (diamond) -->
+  <polygon points="76,28 86,44 76,60 66,44" fill="url(#brandGrad2)" opacity="0.85"/>
+
+  <!-- Node 3: PRD (rounded square) -->
+  <rect x="116" y="12" width="24" height="24" rx="5" fill="url(#brandGrad)" opacity="0.8"/>
+
+  <!-- Node 4: Architecture (hexagon) -->
+  <polygon points="176,16 186,8 196,16 196,28 186,36 176,28" fill="url(#brandGrad2)" opacity="0.85"/>
+
+  <!-- Node 5: Tasks/Output (document shape) -->
+  <path d="M 226 20 L 242 20 L 250 28 L 250 44 Q 250 48 246 48 L 230 48 Q 226 48 226 44 Z" 
+        fill="url(#brandGrad)" opacity="0.9"/>
+  <line x1="232" y1="30" x2="244" y2="30" stroke="#fff" stroke-width="1.5" stroke-opacity="0.6"/>
+  <line x1="232" y1="35" x2="244" y2="35" stroke="#fff" stroke-width="1.5" stroke-opacity="0.6"/>
+  <line x1="232" y1="40" x2="240" y2="40" stroke="#fff" stroke-width="1.5" stroke-opacity="0.6"/>
+
+  <!-- Output arrow -->
+  <path d="M 254 36 L 270 36" stroke="#a78bfa" stroke-width="2" stroke-linecap="round"/>
+  <polygon points="270,32 278,36 270,40" fill="#a78bfa"/>
+
+  <!-- Small connecting particles -->
+  <circle cx="50" cy="44" r="2" fill="#a78bfa" opacity="0.5"/>
+  <circle cx="100" cy="20" r="2" fill="#a78bfa" opacity="0.5"/>
+  <circle cx="156" cy="8" r="2" fill="#a78bfa" opacity="0.5"/>
+  <circle cx="212" cy="14" r="2" fill="#a78bfa" opacity="0.5"/>
+
+  <!-- === Typography === -->
+
+  <!-- "AI Project" -->
+  <text x="28" y="94" font-family="system-ui, -apple-system, sans-serif" font-size="22" font-weight="700" fill="#f8fafc" letter-spacing="-0.3">
+    AI Project
+  </text>
+
+  <!-- "CTO" with gradient -->
+  <text x="192" y="94" font-family="system-ui, -apple-system, sans-serif" font-size="22" font-weight="700" fill="url(#brandGrad2)" letter-spacing="1">
+    CTO
+  </text>
+
+  <!-- Tagline -->
+  <text x="28" y="114" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="#64748b" letter-spacing="0.3">
+    Idea → Business Analysis → PRD → Architecture → Tasks
+  </text>
+</svg>
