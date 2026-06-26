@@ -4,18 +4,21 @@ Brief summary of product analysis and visualization feature design (June 2026).
 
 ---
 
-## Current State (MVP v0.1)
+## Current State (v0.2 — June 2026)
 
-The core engine is done: four agents, FastAPI backend, Next.js control panel, markdown workspace export, and CLI full pipeline.
+All core MVP features are complete. The project has progressed beyond the initial gaps.
 
 | Layer | Status |
 |-------|--------|
 | Business → Product → Architect → Planner agents | Implemented |
-| In-memory project store | Working (lost on restart) |
-| Export to `projects/<slug>-<id>/` | Working |
-| Tests | Minimal (router config + export) |
-
-**Gap:** Users often stop halfway through the pipeline. Example export had Business + PRD done, but Architecture and Tasks were `_Not yet generated._` — the bottleneck is UX/workflow completion, not agent capability.
+| SQLite persistence (aiosqlite) | ✅ Working — survives restarts |
+| Preview-&-Approve flow | ✅ Agents run without auto-save; explicit approve step |
+| Project list / load / delete | ✅ Saved Projects panel in UI + `GET /projects` + `DELETE /project/{id}` |
+| Run-all-agents UI | ✅ SSE stream + individual agent buttons |
+| Editable JSON preview | ✅ Raw JSON editor before approving |
+| Export formats | ✅ Markdown workspace + HTML report + Mermaid architecture diagram |
+| CLI pipeline | ✅ Linear LangGraph pipeline; supports `--agents` filter |
+| Tests | 12 passing (store, export, router config) |
 
 ---
 
@@ -37,24 +40,25 @@ Configure via `.env`: `KIMI_API_KEY`, `DEEPSEEK_API_KEY`, `MINIMAX_API_KEY`.
 
 ## Recommended Product Roadmap
 
-Prioritized from existing plans (`docs/requirements/chatgpt-1.md`, `chatgpt-2.md`, design spec):
+### 🟢 Completed in v0.2
 
-### Tier 1 — Finish the MVP experience
-
-1. **Run-all-agents UI** — mirror CLI pipeline; show artifact readiness before export
-2. **Markdown workspace viewer** — replace/supplement raw JSON dump in the control panel
-3. **End-to-end validation** — create → all 4 agents → export
+- [x] **Run-all-agents UI** — SSE stream in the ControlPanel; individual agent buttons too
+- [x] **Persistence** — SQLite via aiosqlite; projects survive restarts (see `data/projects.db`)
+- [x] **Project list** — Saved Projects panel with load/delete
+- [x] **End-to-end validation** — create → all 4 agents → approve → export
+- [x] **Human-in-the-loop refinement** — agents output to preview; explicit "Approve & Save" button; editable JSON textarea
 
 ### Tier 2 — Usable across sessions
 
-4. **Persistence** (Supabase/Postgres) — projects survive restarts
-5. **Project list** — load, delete, optionally fork
+4. ~~Persistence~~ ✅ Done (SQLite)
+5. ~~Project list~~ ✅ Done (Saved Projects panel)
 
 ### Tier 3 — Differentiation
 
 6. **GitHub integration** — export tasks as issues or scaffold repo
 7. **Clerk auth** — required for teams/agencies
-8. **Human-in-the-loop refinement** — re-run one agent after editing a slice
+8. **Markdown workspace viewer** — structured markdown rendering in the UI (currently raw JSON)
+9. **Re-run single agent** — re-run one agent after editing its artifact slice
 
 ### Explicitly out of scope (for now)
 

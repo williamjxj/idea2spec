@@ -4,7 +4,7 @@ Reference for all technologies used in this project (MVP v0.1).
 
 ## Overview
 
-AI Project CTO is a **monorepo** with a Python backend (API + agents) and a Next.js frontend. Agents call cloud LLMs through an OpenAI-compatible router and write structured artifacts into an in-memory `Project` store.
+AI Project CTO is a **monorepo** with a Python backend (API + agents) and a Next.js frontend. Agents call cloud LLMs through an OpenAI-compatible router and write structured artifacts into a persistent `Project` store backed by SQLite.
 
 ### High-level architecture
 
@@ -17,7 +17,7 @@ flowchart TB
 
   subgraph api [API Layer]
     FastAPI[FastAPI + Uvicorn]
-    Store[InMemory ProjectStore]
+    Store[SQLite ProjectStore]
     Export[Markdown Exporter]
   end
 
@@ -38,8 +38,12 @@ flowchart TB
 
   subgraph artifacts [Artifacts]
     ProjectJSON[Project JSON]
+    SQLite[(data/projects.db)]
     Workspace[projects/*.md]
   end
+
+  Store --> SQLite
+  SQLite --> ProjectJSON
 
   Browser --> FastAPI
   CLI --> Runtime
@@ -86,32 +90,33 @@ flowchart LR
 
 ### User workflow (control panel)
 
-Human-in-the-loop: the user triggers each agent step manually.
+Preview-&-Approve: agents run without auto-saving. The user reviews, edits, then explicitly approves.
 
 ```mermaid
 flowchart TD
   Start([User opens UI]) --> EnterIdea[Enter project idea]
   EnterIdea --> Create[Click Create Project]
   Create --> HasProject{Project created?}
-  HasProject -->|Yes| RunBiz[Run Business Agent]
-  RunBiz --> RunProd[Run Product Agent]
-  RunProd --> RunArch[Run Architect Agent]
-  RunArch --> RunPlan[Run Planner Agent]
-  RunPlan --> ViewJSON[View Project JSON]
-  ViewJSON --> ExportBtn{Export workspace?}
+  HasProject -->|Yes| RunAgents[Run agents individually or Run All]
+  RunAgents --> Preview[Review artifacts in preview pane]
+  Preview --> Edit{Needs changes?}
+  Edit -->|Yes| RawJSON[Edit raw JSON]
+  RawJSON --> Approve
+  Edit -->|No| Approve[Click Approve & Save to Database]
+  Approve --> ExportBtn{Export workspace?}
   ExportBtn -->|Yes| Export[Export to projects/]
   ExportBtn -->|No| Done([Done])
   Export --> Done
 ```
 
-### Sequence: create project and run one agent
+### Sequence: create project, run one agent, approve & save
 
 ```mermaid
 sequenceDiagram
   actor User
   participant UI as Next.js UI
   participant API as FastAPI
-  participant Store as ProjectStore
+  participant Store as SQLite ProjectStore
   participant Agent as Agent Runtime
   participant LLM as LLM Router
   participant Cloud as Cloud LLM
@@ -119,7 +124,7 @@ sequenceDiagram
   User->>UI: Enter idea + Create Project
   UI->>API: POST /project/create
   API->>Store: create(idea)
-  Store-->>API: Project id + idea
+  Store-->>API: Project id + idea (persisted to data/projects.db)
   API-->>UI: Project JSON
   UI-->>User: Show project id + state
 
@@ -132,10 +137,24 @@ sequenceDiagram
   LLM->>Cloud: POST /v1/chat/completions
   Cloud-->>LLM: JSON response
   LLM-->>Agent: Parsed business_analysis
-  Agent->>Store: save updated Project
-  Store-->>API: Project
-  API-->>UI: Updated Project JSON
+  Agent-->>API: Updated Project (NOT saved to DB yet)
+  API-->>UI: Updated Project JSON (preview mode)
   UI-->>User: Render new artifacts
+
+  User->>UI: Review, click Approve & Save
+  UI->>API: POST /project/{id}/save-artifacts
+  API->>Store: save(project)
+  Store-->>API: Project (persisted to SQLite)
+  API-->>UI: Project with saved flag
+  UI-->>User: Green confirmation bar
+
+  User->>UI: Click Export
+  UI->>API: POST /project/{id}/export
+  API->>Store: get(id)
+  Store-->>API: Project
+  API->>Store: save(project) with export path
+  API-->>UI: ExportResponse
+  UI-->>User: Show export path and files
 ```
 
 ### Sequence: export markdown workspace
@@ -286,9 +305,9 @@ flowchart TB
 | HTTP client (LLM) | httpx | Async |
 | Frontend framework | Next.js (App Router) | ^15.1 |
 | UI library | React | ^19 |
-| Storage (MVP) | In-memory Python dict | No database |
-| Export format | Markdown files | `python-slugify` |
-| Testing | pytest, pytest-asyncio | Backend unit tests |
+| Storage | SQLite (aiosqlite) | Persistent at `data/projects.db`, WAL mode |
+| Export format | Markdown / HTML / Mermaid | `python-slugify` |
+| Testing | pytest, pytest-asyncio | 12 backend unit tests |
 | Package manager (Python) | pip + setuptools | `pyproject.toml` |
 | Package manager (Node) | npm | `package-lock.json` |
 
@@ -319,7 +338,7 @@ apps/web/
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | FastAPI base URL |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8100` | FastAPI base URL |
 
 ---
 
@@ -331,7 +350,7 @@ apps/web/
 | Server | **Uvicorn** | ASGI, `--reload` in dev |
 | Schemas | **Pydantic v2** | `Project` and agent output models |
 | Settings | **pydantic-settings** | Load LLM keys from environment |
-| Store | **In-memory `ProjectStore`** | MVP persistence (dict by project id) |
+| Store | **SQLite `ProjectStore`** | Persistent via aiosqlite at `data/projects.db` |
 | Export | Custom markdown generator | Writes `projects/<slug>/` workspace |
 
 ### API surface
@@ -341,11 +360,13 @@ apps/web/
 | GET | `/health` | Health check |
 | POST | `/project/create` | Create project from idea |
 | GET | `/project/{id}` | Get project JSON |
-| POST | `/agent/business/{id}` | Run Business Analyst |
-| POST | `/agent/product/{id}` | Run Product Manager |
-| POST | `/agent/architect/{id}` | Run Architect |
-| POST | `/agent/planner/{id}` | Run Engineering Planner |
-| POST | `/project/{id}/export` | Export markdown workspace |
+| GET | `/projects` | List all saved projects |
+| DELETE | `/project/{id}` | Delete a project |
+| POST | `/agent/{name}/{id}` | Run single agent (business/product/architect/planner) |
+| POST | `/project/{id}/save-artifacts` | Approve & persist agent artifacts to SQLite |
+| POST | `/project/{id}/export` | Export workspace (markdown / html / mermaid) |
+| GET | `/project/{id}/export/{format}/download` | Download exported file |
+| POST | `/run-all/{id}` | SSE stream — run all 4 agents sequentially |
 
 ### Backend layout
 
@@ -447,9 +468,9 @@ TypeScript types in `apps/web/lib/api.ts` mirror this shape for the UI.
 
 ## Storage & Artifacts
 
-| Concern | MVP | Planned |
-|---------|-----|---------|
-| Project state | In-memory (process-local) | PostgreSQL / Supabase |
+| Concern | Current | Planned |
+|---------|---------|---------|
+| Project state | **SQLite** (`data/projects.db`, persistent) | PostgreSQL / Supabase |
 | Vector / RAG | Not used | pgvector (future) |
 | Exported workspaces | `projects/` directory (gitignored) | Live markdown UI |
 | Auth | None | Clerk (planned) |
@@ -482,7 +503,8 @@ projects/<slug>-<id>/
 
 ```text
 fastapi, uvicorn, pydantic, pydantic-settings, httpx,
-langgraph, langchain-core, python-dotenv, python-slugify
+langgraph, langchain-core, python-dotenv, python-slugify,
+aiosqlite
 ```
 
 Dev: `pytest`, `pytest-asyncio`
@@ -529,7 +551,7 @@ flowchart TB
 ```mermaid
 flowchart LR
   User[Developer] --> Web[Next.js :3000]
-  User --> API[FastAPI :8000]
+  User --> API[FastAPI :8100]
   Web -->|REST| API
   API --> LLM[Cloud LLM APIs]
   API --> Disk[projects/ folder]
@@ -537,7 +559,7 @@ flowchart LR
 
 | Service | Port | Command |
 |---------|------|---------|
-| FastAPI | 8000 | `make api` |
+| FastAPI | **8100** | `make api` |
 | Next.js | 3000 | `make web` |
 
 ---
@@ -552,6 +574,15 @@ flowchart LR
 | Docker / Kubernetes | Planned |
 | GitHub repo generator | Planned |
 | Coding agent | Out of scope |
+
+## Recent Milestones
+
+| Milestone | Date |
+|-----------|------|
+| SQLite persistence — Turso/libsql → aiosqlite migration; fixes data isolation bug | June 2026 |
+| Preview-&-Approve flow — agents no longer auto-save; explicit approval step | June 2026 |
+| ControlPanel UI — stepper, agent cards, editable JSON, saved projects panel | June 2026 |
+| Export formats — Markdown workspace + HTML report + Mermaid diagram | June 2026 |
 
 ---
 

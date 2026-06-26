@@ -52,7 +52,7 @@ cd apps/web && npm run dev
 ### Key files
 ```
 services/api/main.py          FastAPI app — CORS, endpoints, error handling
-services/api/store.py         In-memory ProjectStore (dict, process-local — lost on restart)
+services/api/store.py         SQLite ProjectStore (aiosqlite, persistent — data/projects.db)
 services/api/export.py        Markdown workspace exporter → projects/<slug>-<id>/
 services/agent_runtime/       agents.py (runners), workflow.py (LangGraph pipeline)
 services/llm_router/          config.py (env → provider routing), router.py (async httpx + JSON extraction)
@@ -63,18 +63,23 @@ apps/web/                     Next.js (no CSS framework, inline styles only)
 ```
 
 ### State management
-- **In-memory** — no database. Restarting the server loses all projects.
+- **SQLite** (`data/projects.db`, aiosqlite, WAL mode) — persistent across restarts.
 - Agents mutate slices of a shared `Project` Pydantic object (not a chat).
-- UI-driven: human clicks an agent button → POST `/agent/{name}/{id}` → agent runs → project saved → UI re-renders JSON.
-- CLI-driven: linear LangGraph pipeline runs all selected agents sequentially.
+- UI-driven: human clicks an agent button → POST `/agent/{name}/{id}` → agent runs → output returned in **preview** (NOT auto-saved). User clicks **Approve & Save** → `POST /project/{id}/save-artifacts` persists to SQLite.
+- CLI-driven: linear LangGraph pipeline runs all selected agents sequentially and saves directly.
 
 ### API endpoints
 ```
-POST /project/create            → { idea } → Project
-GET  /project/{id}              → Project
-POST /agent/{name}/{id}         → Project    # name = business|product|architect|planner
-POST /project/{id}/export       → { path, project }
-GET  /health                    → { status: "ok" }
+POST  /project/create                → { idea } → Project
+GET   /project/{id}                  → Project
+GET   /projects                      → list[Project] (newest first)
+DELETE /project/{id}                 → { deleted, idea }
+POST  /agent/{name}/{id}             → Project (preview, NOT saved)
+POST  /project/{id}/save-artifacts   → Project (approve & persist)
+POST  /project/{id}/export           → { path, project } (markdown|html|mermaid)
+GET   /project/{id}/export/{fmt}/download  → file download
+POST  /run-all/{id}                  → SSE stream (all 4 agents)
+GET   /health                        → { status: "ok" }
 ```
 
 ### LLM routing
@@ -98,7 +103,7 @@ JSON parse failure triggers one automatic retry with a fix prompt.
 
 - **Backend**: `pytest` + `pytest-asyncio`, `asyncio_mode = auto` (all tests are async-safe).
 - **Frontend**: No test infrastructure exists. Report this if asked to add or modify tests.
-- Tests live in `tests/` — only 2 files: `test_router_config.py`, `test_export.py`.
+- Tests live in `tests/` — 3 files: `test_router_config.py`, `test_export.py`, `test_store.py` (12 tests total).
 - Run single: `PYTHONPATH=. venv/bin/pytest tests/test_export.py -v`
 
 ## Repo conventions & quirks

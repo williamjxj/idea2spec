@@ -3,47 +3,39 @@
 Multi-agent workflow engine that transforms a software idea into structured project artifacts.
 
 ```text
-Idea → Business Analysis → PRD → Architecture → Tasks → Workspace
+Idea → Business Analysis → PRD → Architecture → Tasks → Markdown Workspace
 ```
 
-## Stack
+Run 4 AI agents (Business Analyst, Product Manager, Architect, Engineering Planner) against your idea — preview their output, edit it, approve it, and export a complete project workspace.
 
-- **Backend:** FastAPI + LangGraph
-- **Frontend:** Next.js control panel
-- **LLM:** DeepSeek, Kimi, MiniMax (OpenAI-compatible APIs)
-- **Storage:** In-memory (MVP)
-
-Full stack reference (architecture, workflows, sequence diagrams): **[docs/tech-stack.md](docs/tech-stack.md)**
-
-## Setup
-
-### 1. Python backend
+## Quick Start
 
 ```bash
-cd ai-project-cto
-python -m venv venv
-source venv/bin/activate
-pip install -e .
-cp .env.example .env   # add your API keys
-```
+# 1. Backend
+python -m venv venv && source venv/bin/activate
+pip install -e ".[dev]"
+cp .env.example .env   # add API keys (DeepSeek, Kimi, MiniMax)
 
-### 2. Run API
-
-```bash
+# 2. Run API (port 8100)
 PYTHONPATH=. uvicorn services.api.main:app --reload --host 0.0.0.0 --port 8100
+
+# 3. Frontend (port 3000)
+cd apps/web && npm install && npm run dev
 ```
 
-### 3. Next.js UI
+Open **http://localhost:3000**
+
+Or use the Makefile:
 
 ```bash
-cd apps/web
-npm install
-npm run dev
+make install       # full install (venv + pip + npm)
+make api           # start backend
+make web           # start frontend
 ```
 
-Open http://localhost:3000
+## CLI Pipeline
 
-## CLI
+Run all agents from the terminal with a single command:
 
 ```bash
 PYTHONPATH=. python scripts/cli.py "I want to build AI Resume SaaS" --export
@@ -55,37 +47,113 @@ Run specific agents:
 PYTHONPATH=. python scripts/cli.py "My idea" --agents business,product
 ```
 
+The CLI also supports `make cli IDEA="..."`.
+
+## Preview-&-Approve Workflow
+
+The UI follows a **human-in-the-loop** flow:
+
+1. **Create Project** — enters your idea, creates a DB record
+2. **Run Agents** — click individual agent buttons or "Run All" — results appear in a **preview pane**, NOT saved to DB
+3. **Review & Edit** — browse structured views (Business → PRD → Architecture → Tasks) or switch to **Raw JSON** to edit directly
+4. **Approve & Save** — explicit click persists all artifacts to the database
+5. **Export** — download as Markdown workspace, HTML report, or Mermaid architecture diagram
+
+A **Saved Projects** panel lists all persisted projects — load them back for re-review or re-export.
+
+## Stack Overview
+
+| Layer | Technology |
+|-------|-----------|
+| **Backend** | FastAPI + Uvicorn (port 8100) |
+| **Agent Runtime** | LangGraph (CLI pipeline) / direct calls (UI) |
+| **Frontend** | Next.js 15 (port 3000, `/api/*` proxied to backend) |
+| **Storage** | SQLite via `aiosqlite` — persistent at `data/projects.db` (WAL mode) |
+| **LLM Router** | Async httpx → OpenAI-compatible APIs |
+| **Export** | Markdown workspace + HTML report + Mermaid diagram |
+
+Full architecture: **[docs/tech-stack.md](docs/tech-stack.md)**
+
 ## API Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/project/create` | Create project from idea |
 | GET | `/project/{id}` | Get project state |
-| POST | `/agent/business/{id}` | Run Business Analyst |
-| POST | `/agent/product/{id}` | Run Product Manager |
-| POST | `/agent/architect/{id}` | Run Architect |
-| POST | `/agent/planner/{id}` | Run Engineering Planner |
-| POST | `/project/{id}/export` | Export markdown workspace |
+| GET | `/projects` | List all saved projects (newest first) |
+| DELETE | `/project/{id}` | Delete a project |
+| POST | `/agent/{name}/{id}` | Run a single agent (`business`/`product`/`architect`/`planner`) |
+| POST | `/project/{id}/save-artifacts` | Approve & persist agent artifacts |
+| POST | `/project/{id}/export` | Export workspace (markdown / html / mermaid) |
+| GET | `/project/{id}/export/{format}/download` | Download exported file |
+| POST | `/run-all/{id}` | SSE stream — runs all 4 agents sequentially |
+| GET | `/health` | Health check |
 
 ## LLM Routing
 
-| Agent | Provider |
-|-------|----------|
-| Business Analyst | Kimi |
-| Product Manager | DeepSeek |
-| Architect | DeepSeek |
-| Planner | MiniMax |
+| Agent | Provider | Model | Temperature |
+|-------|----------|-------|-------------|
+| Business Analyst | Kimi | `kimi-k2.5` | 1.0 |
+| Product Manager | DeepSeek | `deepseek-v4-pro` | 0.3 |
+| Architect | DeepSeek | `deepseek-v4-pro` | 0.3 |
+| Engineering Planner | MiniMax | `MiniMax-M2.5` | 0.3 |
+| Fallback (missing key) | DeepSeek | `deepseek-v4-pro` | 0.3 |
 
-Configure via `.env` — see `.env.example`.
+If a provider's API key is missing, the router falls back to DeepSeek.
+JSON parse failures trigger one automatic retry with a fix prompt.
+
+## Environment Variables
+
+| Variable | Required | Default |
+|----------|----------|---------|
+| `DEEPSEEK_API_KEY` | Yes | — |
+| `KIMI_API_KEY` | Yes | — |
+| `MINIMAX_API_KEY` | Yes | — |
+| `CORS_ORIGINS` | No | `http://localhost:3000,http://127.0.0.1:3000` |
+| `DATABASE_PATH` | No | `data/projects.db` |
 
 ## Project Structure
 
 ```text
-apps/web/                 Next.js control panel
-services/api/             FastAPI + in-memory store
-services/agent-runtime/   LangGraph agents
-services/llm-router/      Multi-provider LLM client
-packages/schemas/         Pydantic Project model
-packages/prompts/         Agent system prompts
-projects/                 Exported markdown workspaces
+apps/web/                 Next.js 15 control panel
+  components/             React components (ControlPanel, BusinessView, PRDView, …)
+  lib/api.ts              TypeScript API client
+
+services/
+  api/                    FastAPI backend
+    main.py               Routes, CORS, error handling
+    store.py              Project CRUD (SQLite via aiosqlite)
+    db.py                 Database connection manager (singleton, WAL mode)
+    export.py             Markdown/HTML/Mermaid workspace export
+  agent_runtime/          LangGraph agents + workflow
+  llm_router/             Multi-provider LLM client (httpx + JSON extraction)
+
+packages/
+  schemas/project.py      Pydantic models — single source of truth
+  prompts/agents.py       Agent system prompts
+
+scripts/cli.py            Terminal entrypoint for full pipeline
+
+data/                     SQLite database (gitignored)
+projects/                 Exported workspaces (gitignored)
+tests/                    Pytest suite (12 tests)
 ```
+
+## Testing
+
+```bash
+make test                 # PYTHONPATH=. venv/bin/pytest tests/ -q
+PYTHONPATH=. venv/bin/pytest tests/ -v     # verbose
+```
+
+Backend tests use `pytest-asyncio` with an `InMemoryStore` — no database dependency.
+
+## Related Docs
+
+| Document | Description |
+|----------|-------------|
+| [Full Tech Stack](docs/tech-stack.md) | Architecture diagrams, workflows, sequence flows |
+| [Next Steps & Roadmap](docs/next-steps-and-visualization.md) | Product roadmap, visualization pipeline |
+| [Preview-&-Approve Flow](docs/preview-approve-flow.md) | Human-in-the-loop design for agent output review |
+| [Agent Guide](AGENTS.md) | Detailed commands, agent config, quirks for developers |
+| [Design Spec](docs/superpowers/specs/2026-06-24-ai-project-cto-design.md) | Original MVP design specification |
