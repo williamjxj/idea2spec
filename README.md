@@ -21,8 +21,8 @@ Full stack reference (architecture, workflows, sequence diagrams): **[docs/tech-
 
 ```bash
 cd ai-project-cto
-python -m venv .venv
-source .venv/bin/activate
+python -m venv venv
+source venv/bin/activate
 pip install -e .
 cp .env.example .env   # add your API keys
 ```

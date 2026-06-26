@@ -49,6 +49,10 @@ pnpm-debug.log*
 # Generated project workspaces
 projects/
 
+# Local databases (SQLite)
+data/
+*.db
+
 # Git worktrees
 .worktrees/
 

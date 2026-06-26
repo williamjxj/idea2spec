@@ -1,11 +1,11 @@
 CREATE TABLE IF NOT EXISTS projects (
-    id                UUID PRIMARY KEY,
+    id                TEXT PRIMARY KEY,
     idea              TEXT NOT NULL,
-    business_analysis JSONB,
-    prd               JSONB,
-    architecture      JSONB,
-    tasks             JSONB,
-    exports           JSONB DEFAULT '[]'::jsonb,
-    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+    business_analysis TEXT,
+    prd               TEXT,
+    architecture      TEXT,
+    tasks             TEXT,
+    exports           TEXT DEFAULT '[]',
+    created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );

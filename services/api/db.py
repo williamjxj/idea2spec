@@ -1,44 +1,47 @@
 import os
 from pathlib import Path
 
-import asyncpg
+import aiosqlite
 
-_pool: asyncpg.Pool | None = None
-
-
-def _dsn() -> str:
-    return os.getenv(
-        "DATABASE_URL",
-        f"postgresql://{os.getenv('PGUSER', 'postgres')}:{os.getenv('PGPASSWORD', 'postgres')}"
-        f"@{os.getenv('PGHOST', 'localhost')}:{os.getenv('PGPORT', '5432')}"
-        f"/{os.getenv('PGDATABASE', 'ai_project_cto')}",
-    )
+_connection: aiosqlite.Connection | None = None
 
 
-async def init_db_pool() -> asyncpg.Pool:
-    global _pool
-    if _pool is None:
-        _pool = await asyncpg.create_pool(dsn=_dsn(), min_size=2, max_size=10)
-    return _pool
+def _db_path() -> Path:
+    """Return the path to the local SQLite database file."""
+    env_path = os.getenv("DATABASE_PATH")
+    if env_path:
+        return Path(env_path)
+    return Path(__file__).resolve().parents[2] / "data" / "projects.db"
 
 
-async def get_pool() -> asyncpg.Pool:
-    if _pool is None:
-        return await init_db_pool()
-    return _pool
-
-
-async def close_db_pool() -> None:
-    global _pool
-    if _pool is not None:
-        await _pool.close()
-        _pool = None
+async def get_connection() -> aiosqlite.Connection:
+    """Return the shared async SQLite connection — creates if needed."""
+    global _connection
+    if _connection is None:
+        db_file = _db_path()
+        db_file.parent.mkdir(parents=True, exist_ok=True)
+        _connection = await aiosqlite.connect(str(db_file))
+        _connection.row_factory = aiosqlite.Row
+        await _connection.execute("PRAGMA journal_mode=WAL")
+        await _connection.execute("PRAGMA foreign_keys=ON")
+    return _connection
 
 
 async def run_migrations() -> None:
-    """Run scripts/init_db.sql to ensure schema exists."""
-    pool = await get_pool()
+    """Run init_db.sql to ensure the schema exists."""
+    conn = await get_connection()
     sql_path = Path(__file__).resolve().parents[2] / "scripts" / "init_db.sql"
     sql = sql_path.read_text()
-    async with pool.acquire() as conn:
-        await conn.execute(sql)
+    for statement in sql.split(";"):
+        stmt = statement.strip()
+        if stmt:
+            await conn.execute(stmt)
+    await conn.commit()
+
+
+async def close_db() -> None:
+    """Close the database connection."""
+    global _connection
+    if _connection is not None:
+        await _connection.close()
+        _connection = None

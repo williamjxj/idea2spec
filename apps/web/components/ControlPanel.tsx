@@ -1,16 +1,21 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createProject,
+  deleteProject,
   formatApiError,
   getExportZipUrl,
+  getProject,
+  listProjects,
   runAgent,
   runAllAgents,
+  saveProjectArtifacts,
   type AgentKey,
   type PipelineState,
   type PipelineStatus,
   type Project,
+  type SaveArtifactsPayload,
 } from "@/lib/api";
 import BusinessView from "./BusinessView";
 import PRDView from "./PRDView";
@@ -55,14 +60,62 @@ export default function ControlPanel() {
   const [pipelineRunning, setPipelineRunning] = useState(false);
   const [exportFormat, setExportFormat] = useState<ExportFormat>("markdown");
   const [showRawJson, setShowRawJson] = useState(false);
+  const [savedToDb, setSavedToDb] = useState(false);
+  const [exportPath, setExportPath] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [savedProjects, setSavedProjects] = useState<Project[]>([]);
+  const [showSavedProjects, setShowSavedProjects] = useState(false);
+  const [loadingSaved, setLoadingSaved] = useState(false);
+  const [editableJson, setEditableJson] = useState("");
+  const [editMode, setEditMode] = useState(false);
   const projectRef = useRef(project);
   projectRef.current = project;
 
-  const isBusy = loading !== null || pipelineRunning;
+  const isBusy = loading !== null || pipelineRunning || saving;
+
+  // Fetch saved projects list
+  const fetchSavedProjects = useCallback(async () => {
+    setLoadingSaved(true);
+    try {
+      const projects = await listProjects();
+      setSavedProjects(projects);
+    } catch {
+      // silently fail
+    } finally {
+      setLoadingSaved(false);
+    }
+  }, []);
+
+  // Load a saved project from DB for viewing
+  const handleLoadProject = useCallback(async (projectId: string) => {
+    try {
+      const p = await getProject(projectId);
+      setProject(p);
+      setPipelineState("idle");
+      setAgentStatus(initialPipelineStatus());
+      setSavedToDb(true);
+      setExportPath(null);
+      setError(null);
+      setEditMode(false);
+    } catch (e) {
+      setError(formatApiError(e));
+    }
+  }, []);
+
+  // Delete a saved project
+  const handleDeleteProject = useCallback(async (projectId: string) => {
+    try {
+      await deleteProject(projectId);
+      await fetchSavedProjects();
+    } catch (e) {
+      setError(formatApiError(e));
+    }
+  }, [fetchSavedProjects]);
 
   const handleRunAll = useCallback(() => {
     if (!project) return;
     setError(null);
+    setSavedToDb(false);
     setPipelineRunning(true);
     setPipelineState("running");
     setAgentStatus(initialPipelineStatus());
@@ -97,9 +150,13 @@ export default function ControlPanel() {
     if (!idea.trim()) return;
     setLoading("create");
     setError(null);
+    setSavedToDb(false);
+    setExportPath(null);
     try {
       const p = await createProject(idea.trim());
       setProject(p);
+      setEditMode(false);
+      await fetchSavedProjects();
     } catch (e) {
       setError(formatApiError(e));
     } finally {
@@ -111,6 +168,7 @@ export default function ControlPanel() {
     if (!project) return;
     setLoading(agent);
     setError(null);
+    setSavedToDb(false);
     try {
       const p = await runAgent(project.id, agent);
       setProject(p);
@@ -151,6 +209,60 @@ export default function ControlPanel() {
     setPipelineRunning(false);
   }
 
+  async function handleSaveToDb() {
+    if (!project) return;
+    setSaving(true);
+    setError(null);
+    try {
+      let payload: SaveArtifactsPayload;
+      if (editMode) {
+        // Parse the edited JSON
+        try {
+          const parsed = JSON.parse(editableJson);
+          payload = {
+            business_analysis: parsed.business_analysis ?? null,
+            prd: parsed.prd ?? null,
+            architecture: parsed.architecture ?? null,
+            tasks: parsed.tasks ?? null,
+          };
+        } catch {
+          setError("Invalid JSON — fix errors before saving");
+          setSaving(false);
+          return;
+        }
+      } else {
+        payload = {
+          business_analysis: project.business_analysis ?? null,
+          prd: project.prd ?? null,
+          architecture: project.architecture ?? null,
+          tasks: project.tasks ?? null,
+        };
+      }
+      const saved = await saveProjectArtifacts(project.id, payload);
+      setProject(saved.project);
+      setSavedToDb(true);
+      setEditMode(false);
+      setExportPath(saved.export_path);
+      await fetchSavedProjects();
+    } catch (e) {
+      setError(formatApiError(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Enter edit mode with current JSON
+  function handleEditJson() {
+    if (!project) return;
+    setEditableJson(JSON.stringify(
+      { business_analysis: project.business_analysis ?? null, prd: project.prd ?? null, architecture: project.architecture ?? null, tasks: project.tasks ?? null },
+      null,
+      2
+    ));
+    setEditMode(true);
+    setShowRawJson(true);
+  }
+
   async function handleDownload() {
     if (!project) return;
     const url = getExportZipUrl(project.id, exportFormat);
@@ -165,6 +277,8 @@ export default function ControlPanel() {
   const getCompletedCount = () =>
     AGENT_ORDER.filter((k) => agentStatus[k] === "complete").length;
 
+  const hasArtifacts = project?.business_analysis || project?.prd || project?.architecture || project?.tasks;
+
   return (
     <div style={styles.container}>
       <header style={styles.header}>
@@ -174,6 +288,42 @@ export default function ControlPanel() {
         </p>
       </header>
 
+      {/* ── Saved Projects Panel ── */}
+      <section style={styles.section}>
+        <button
+          style={styles.savedProjectsToggle}
+          onClick={() => { setShowSavedProjects(!showSavedProjects); if (!showSavedProjects) fetchSavedProjects(); }}
+        >
+          {showSavedProjects ? "\u25BC" : "\u25B6"} Saved Projects ({savedProjects.length})
+        </button>
+        {showSavedProjects && (
+          <div style={styles.savedProjectsPanel}>
+            {loadingSaved ? (
+              <p style={{ color: "#94a3b8", fontSize: "0.85rem" }}>Loading...</p>
+            ) : savedProjects.length === 0 ? (
+              <p style={{ color: "#64748b", fontSize: "0.85rem" }}>No saved projects yet.</p>
+            ) : (
+              savedProjects.map((sp) => (
+                <div key={sp.id} style={styles.savedProjectItem}>
+                  <div style={{ flex: 1, overflow: "hidden" }}>
+                    <span style={styles.savedProjectTitle}>{sp.idea}</span>
+                    <span style={styles.savedProjectMeta}>
+                      {sp.created_at ? new Date(sp.created_at).toLocaleDateString() : ""}
+                      {sp.business_analysis ? " \u2022 agent output saved" : " \u2022 idea only"}
+                    </span>
+                  </div>
+                  <div style={styles.savedProjectActions}>
+                    <button style={styles.loadBtn} onClick={() => handleLoadProject(sp.id)}>Load</button>
+                    <button style={styles.delBtn} onClick={() => handleDeleteProject(sp.id)}>Delete</button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* ── Create Project ── */}
       <section style={styles.section}>
         <label style={styles.label} htmlFor="idea">
           Project Idea
@@ -195,10 +345,13 @@ export default function ControlPanel() {
         </button>
       </section>
 
+      {/* ── Agent Controls ── */}
       {project && (
         <section style={styles.section}>
           <p style={styles.meta}>
-            Project ID: <code>{project.id}</code>
+            Project: <strong>{project.idea}</strong>
+            &nbsp;|&nbsp;ID: <code>{project.id.slice(0, 8)}</code>
+            {savedToDb && <span style={styles.savedBadge}> \u2713 Saved</span>}
           </p>
 
           <button
@@ -246,6 +399,43 @@ export default function ControlPanel() {
             ))}
           </div>
 
+          {/* ── Preview / Approve Flow ── */}
+          {hasArtifacts && !savedToDb && (
+            <div style={styles.approveBar}>
+              <span style={{ fontSize: "0.85rem", color: "#fbbf24" }}>
+                \u26A0 Preview mode \u2014 artifacts not yet saved to database
+              </span>
+              <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
+                <button
+                  style={styles.saveBtn}
+                  onClick={handleSaveToDb}
+                  disabled={saving}
+                >
+                  {saving ? "Saving\u2026" : "\u2713 Approve & Save to Database"}
+                </button>
+                <button
+                  style={styles.editBtn}
+                  onClick={handleEditJson}
+                  disabled={editMode}
+                >
+                  {"\u270F"} Edit Artifacts (JSON)
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Saved confirmation ── */}
+          {savedToDb && (
+            <div style={styles.savedBar}>
+              <div>\u2713 Artifacts saved to database</div>
+              {exportPath && (
+                <div style={{ fontSize: "0.75rem", color: "#94a3b8", marginTop: "0.25rem" }}>
+                  Filesystem: <code>{exportPath}</code>
+                </div>
+              )}
+            </div>
+          )}
+
           <div style={styles.exportRow}>
             <select
               style={styles.formatSelect}
@@ -272,47 +462,69 @@ export default function ControlPanel() {
 
       {error && <p style={styles.error}>{error}</p>}
 
+      {/* ── Project Artifacts ── */}
       {project && (
         <section style={styles.section}>
           <div style={styles.sectionHeader}>
             <h2 style={styles.sectionTitle}>Project Artifacts</h2>
             <button
               style={styles.toggleJsonBtn}
-              onClick={() => setShowRawJson(!showRawJson)}
+              onClick={() => { setShowRawJson(!showRawJson); if (editMode) setEditMode(false); }}
             >
-              {showRawJson ? "Hide Raw JSON" : "Show Raw JSON"}
+              {showRawJson ? "Structured View" : "Raw JSON"}
             </button>
           </div>
 
           {/* Structured views */}
-          {project.business_analysis && !showRawJson && (
+          {!showRawJson && project.business_analysis && (
             <div style={styles.artifactCard}>
               <h3 style={styles.artifactTitle}>Business Analysis</h3>
               <BusinessView data={project.business_analysis} />
             </div>
           )}
-          {project.prd && !showRawJson && (
+          {!showRawJson && project.prd && (
             <div style={styles.artifactCard}>
               <h3 style={styles.artifactTitle}>Product Requirements (PRD)</h3>
               <PRDView data={project.prd} />
             </div>
           )}
-          {project.architecture && !showRawJson && (
+          {!showRawJson && project.architecture && (
             <div style={styles.artifactCard}>
               <h3 style={styles.artifactTitle}>Architecture</h3>
               <ArchitectureView data={project.architecture} />
             </div>
           )}
-          {project.tasks && !showRawJson && (
+          {!showRawJson && project.tasks && (
             <div style={styles.artifactCard}>
               <h3 style={styles.artifactTitle}>Implementation Tasks</h3>
               <TasksView data={project.tasks} />
             </div>
           )}
 
-          {/* Raw JSON (collapsible) */}
-          {(showRawJson || !showRawJson && !project.business_analysis && !project.prd && !project.architecture && !project.tasks) && (
+          {/* Editable JSON (when in edit mode) */}
+          {editMode && (
+            <div>
+              <p style={{ color: "#fbbf24", fontSize: "0.8rem", marginBottom: "0.5rem" }}>
+                Edit the JSON below, then click &quot;Approve &amp; Save to Database&quot; to persist.
+              </p>
+              <textarea
+                style={{ ...styles.json, minHeight: 300, resize: "vertical" } as React.CSSProperties}
+                value={editableJson}
+                onChange={(e) => setEditableJson(e.target.value)}
+              />
+            </div>
+          )}
+
+          {/* Read-only JSON (show raw mode, not edit mode) */}
+          {showRawJson && !editMode && (
             <pre style={styles.json}>{JSON.stringify(project, null, 2)}</pre>
+          )}
+
+          {/* Empty state */}
+          {!hasArtifacts && !showRawJson && !editMode && (
+            <p style={{ color: "#64748b", fontSize: "0.9rem" }}>
+              Run agents to generate project artifacts. After reviewing, click &quot;Approve &amp; Save to Database&quot; to persist.
+            </p>
           )}
         </section>
       )}
@@ -479,4 +691,107 @@ const styles: Record<string, React.CSSProperties> = {
   },
   error: { color: "#f87171", background: "#450a0a", padding: "0.75rem", borderRadius: 8 },
   success: { color: "#4ade80", fontSize: "0.875rem" },
+  savedProjectsToggle: {
+    display: "block",
+    width: "100%",
+    padding: "0.5rem 0.75rem",
+    borderRadius: 8,
+    border: "1px solid #334155",
+    background: "#1e293b",
+    color: "#94a3b8",
+    fontSize: "0.85rem",
+    fontWeight: 600,
+    cursor: "pointer",
+    textAlign: "left" as const,
+  },
+  savedProjectsPanel: {
+    marginTop: "0.5rem",
+    padding: "0.75rem",
+    borderRadius: 8,
+    background: "#1e293b",
+    border: "1px solid #334155",
+    maxHeight: 240,
+    overflowY: "auto" as const,
+  },
+  savedProjectItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    padding: "0.5rem 0.4rem",
+    borderBottom: "1px solid #1e293b",
+    fontSize: "0.8rem",
+  },
+  savedProjectTitle: {
+    color: "#e2e8f0",
+    display: "block",
+    whiteSpace: "nowrap" as const,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  savedProjectMeta: {
+    color: "#64748b",
+    fontSize: "0.7rem",
+    display: "block",
+  },
+  savedProjectActions: {
+    display: "flex",
+    gap: "0.3rem",
+    flexShrink: 0,
+  },
+  loadBtn: {
+    padding: "0.2rem 0.5rem",
+    borderRadius: 4,
+    border: "1px solid #3b82f6",
+    background: "transparent",
+    color: "#60a5fa",
+    fontSize: "0.7rem",
+    cursor: "pointer",
+  },
+  delBtn: {
+    padding: "0.2rem 0.5rem",
+    borderRadius: 4,
+    border: "1px solid #ef4444",
+    background: "transparent",
+    color: "#f87171",
+    fontSize: "0.7rem",
+    cursor: "pointer",
+  },
+  approveBar: {
+    marginTop: "0.75rem",
+    padding: "0.75rem",
+    borderRadius: 8,
+    background: "#422006",
+    border: "1px solid #a16207",
+  },
+  saveBtn: {
+    padding: "0.5rem 1rem",
+    borderRadius: 8,
+    border: "none",
+    background: "linear-gradient(135deg, #059669, #10b981)",
+    color: "#fff",
+    fontWeight: 700,
+    fontSize: "0.85rem",
+    cursor: "pointer",
+  },
+  editBtn: {
+    padding: "0.5rem 1rem",
+    borderRadius: 8,
+    border: "1px solid #a16207",
+    background: "transparent",
+    color: "#fbbf24",
+    fontWeight: 600,
+    fontSize: "0.85rem",
+    cursor: "pointer",
+  },
+  savedBar: {
+    marginTop: "0.75rem",
+    padding: "0.5rem 0.75rem",
+    borderRadius: 8,
+    background: "#064e3b",
+    border: "1px solid #059669",
+    color: "#6ee7b7",
+    fontSize: "0.85rem",
+    fontWeight: 600,
+  },
+  savedBadge: { color: "#34d399", fontSize: "0.8rem", fontWeight: 600 },
 };

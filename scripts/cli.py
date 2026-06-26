@@ -5,6 +5,8 @@ import argparse
 import asyncio
 import json
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Ensure repo root is on path
@@ -22,28 +24,52 @@ from services.api.store import ProjectStore
 from services.llm_router import LLMRouter, LLMRouterError
 
 
+SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+
+async def _run_with_spinner(agent: str, project: Project, router: LLMRouter) -> Project:
+    """Run an agent with a single-line spinner to show it's alive."""
+    loop = asyncio.get_running_loop()
+    agent_task = asyncio.create_task(run_single_agent(agent, project, router))
+    t0 = time.monotonic()
+    idx = 0
+    while not agent_task.done():
+        elapsed = time.monotonic() - t0
+        ch = SPINNER[idx % len(SPINNER)]
+        print(f"  {ch} {agent} agent... ({elapsed:.0f}s)", end="\r", flush=True)
+        idx += 1
+        await asyncio.sleep(0.3)
+    print(" " * 60, end="\r", flush=True)  # clear spinner line
+    return await agent_task
+
+
 async def run_pipeline(store: ProjectStore, idea: str, agents: list[str], export: bool) -> Project:
     router = LLMRouter()
-    project = store.create(idea)
+    project = await store.create(idea)
     print(f"Created project {project.id}\n")
 
     for agent in agents:
-        print(f"Running {agent} agent...")
+        t0 = time.monotonic()
         try:
-            project = await run_single_agent(agent, project, router)  # type: ignore[arg-type]
-            store.save(project)
+            project = await _run_with_spinner(agent, project, router)  # type: ignore[arg-type]
+            await store.save(project)
         except LLMRouterError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
+            print(f"[{_ts()}] Error: {exc}", file=sys.stderr)
             sys.exit(1)
-        print(f"  Done.\n")
+        elapsed = time.monotonic() - t0
+        print(f"[{_ts()}]   Done. ({elapsed:.1f}s)\n")
 
-    print(json.dumps(project.model_dump(), indent=2))
+    print(json.dumps(project.model_dump(mode="json"), indent=2))
 
     if export:
         path = export_project_workspace(project, ROOT / "projects")
         print(f"\nExported workspace to: {path}")
 
     return project
+
+
+def _ts() -> str:
+    return datetime.now(tz=timezone.utc).strftime("%H:%M:%S")
 
 
 def main():

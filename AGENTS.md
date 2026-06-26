@@ -7,13 +7,13 @@ Python backend (FastAPI + LangGraph), Next.js 15 frontend, cloud LLMs via OpenAI
 
 ## Commands
 
-All Python commands require `PYTHONPATH=.` (or `.venv/bin/python`) because the package namespace
+All Python commands require `PYTHONPATH=.` (or `venv/bin/python`) because the package namespace
 (`services.*`, `packages.*`) is not installed as a proper wheel in dev — it relies on the repo root
 being on `sys.path`.
 
 ```bash
 # Install both back-end and front-end
-make install                    # .venv + pip install -e ".[dev]" + npm install
+make install                    # venv + pip install -e ".[dev]" + npm install
 
 # Run FastAPI (port 8100)
 make api                        # PYTHONPATH=. uvicorn services.api.main:app --reload --host 0.0.0.0 --port 8100
@@ -22,7 +22,7 @@ make api                        # PYTHONPATH=. uvicorn services.api.main:app --r
 make web                        # cd apps/web && npm run dev
 
 # Run tests (backend only)
-make test                       # PYTHONPATH=. .venv/bin/pytest tests/ -q
+make test                       # PYTHONPATH=. venv/bin/pytest tests/ -q
 
 # CLI pipeline (create → agents → export)
 make cli IDEA="I want to build AI Resume SaaS"
@@ -35,7 +35,7 @@ PYTHONPATH=. python scripts/cli.py "My idea" --agents business,product
 ### Running without Make
 ```bash
 # Terminal 1 — backend
-source .venv/bin/activate && PYTHONPATH=. uvicorn services.api.main:app --reload --host 0.0.0.0 --port 8100
+source venv/bin/activate && PYTHONPATH=. uvicorn services.api.main:app --reload --host 0.0.0.0 --port 8100
 
 # Terminal 2 — frontend
 cd apps/web && npm run dev
@@ -99,7 +99,7 @@ JSON parse failure triggers one automatic retry with a fix prompt.
 - **Backend**: `pytest` + `pytest-asyncio`, `asyncio_mode = auto` (all tests are async-safe).
 - **Frontend**: No test infrastructure exists. Report this if asked to add or modify tests.
 - Tests live in `tests/` — only 2 files: `test_router_config.py`, `test_export.py`.
-- Run single: `PYTHONPATH=. .venv/bin/pytest tests/test_export.py -v`
+- Run single: `PYTHONPATH=. venv/bin/pytest tests/test_export.py -v`
 
 ## Repo conventions & quirks
 

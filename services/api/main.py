@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import os
@@ -26,18 +27,12 @@ load_dotenv()
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         await db.run_migrations()
-    except (ConnectionRefusedError, OSError) as exc:
-        msg = (
-            f"Cannot connect to PostgreSQL: {exc}\n\n"
-            "Make sure PostgreSQL is running:\n"
-            "  docker start ai-project-cto-db   # if stopped\n"
-            "  make db                          # create and start a fresh container\n\n"
-            "Then restart the API."
-        )
+    except Exception as exc:
+        msg = f"Database setup failed: {exc}"
         print(f"ERROR: {msg}")
-        raise  # keeps FastAPI from starting — DB is required
+        raise
     yield
-    await db.close_db_pool()
+    await db.close_db()
 
 
 app = FastAPI(title="AI Project CTO", version="0.1.0", lifespan=lifespan)
@@ -90,12 +85,17 @@ async def get_project(project_id: str):
 
 
 async def _run_agent(project_id: str, agent: AgentName) -> Project:
+    """Run a single agent and return the result WITHOUT saving to DB.
+
+    The returned project contains the agent output in-memory.  Call
+    POST /project/{id}/save-artifacts to persist it.
+    """
     project = await _get_project_or_404(project_id)
     try:
         updated = await run_single_agent(agent, project, router)
     except LLMRouterError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return await store.save(updated)
+    return updated
 
 
 @app.post("/agent/business/{project_id}", response_model=Project)
@@ -177,21 +177,80 @@ def _sse_event(event: str, data: object) -> str:
 
 @app.post("/project/{project_id}/run-all")
 async def run_all_agents(project_id: str):
+    """Run all agents sequentially; yields SSE events but does NOT save to DB.
+
+    Use POST /project/{id}/save-artifacts after reviewing to persist.
+    """
     project = await _get_project_or_404(project_id)
 
     async def event_stream():
         nonlocal project
+
         for agent in ALL_AGENTS:
             yield _sse_event("agent_start", {"agent": agent})
             try:
                 project = await run_single_agent(agent, project, router)
-            except LLMRouterError as exc:
-                # Save partial state before failing — preserve successful agents' work
-                await store.save(project)
+            except (LLMRouterError, asyncio.TimeoutError) as exc:
                 yield _sse_event("agent_error", {"agent": agent, "error": str(exc)})
                 return
-            await store.save(project)
             yield _sse_event("agent_complete", {"agent": agent})
         yield _sse_event("complete", {"project": project.model_dump(mode="json")})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+class SaveArtifactsRequest(BaseModel):
+    business_analysis: dict | None = None
+    prd: dict | None = None
+    architecture: dict | None = None
+    tasks: dict | None = None
+
+
+class SaveArtifactsResponse(BaseModel):
+    project: Project
+    export_path: str
+
+
+@app.post("/project/{project_id}/save-artifacts", response_model=SaveArtifactsResponse)
+async def save_artifacts(project_id: str, body: SaveArtifactsRequest):
+    """Save or update project artifacts to SQLite AND export markdown to filesystem.
+
+    Accepts partial updates — only the fields provided are written.
+    Use after reviewing agent output in the UI.
+    """
+    from packages.schemas import BusinessAnalysis, PRD, Architecture, Tasks
+
+    project = await _get_project_or_404(project_id)
+
+    if body.business_analysis is not None:
+        project.business_analysis = BusinessAnalysis.model_validate(body.business_analysis)
+    if body.prd is not None:
+        project.prd = PRD.model_validate(body.prd)
+    if body.architecture is not None:
+        project.architecture = Architecture.model_validate(body.architecture)
+    if body.tasks is not None:
+        project.tasks = Tasks.model_validate(body.tasks)
+
+    # 1. Persist to SQLite
+    project = await store.save(project)
+
+    # 2. Export markdown to filesystem (projects/<slug>-<id>/)
+    export_path = export_project_workspace(project)
+    # The export appended to project.exports — save that too
+    project = await store.save(project)
+
+    return SaveArtifactsResponse(project=project, export_path=str(export_path))
+
+
+@app.get("/projects", response_model=list[Project])
+async def list_projects():
+    """Return all saved projects, newest first."""
+    return await store.list_all()
+
+
+@app.delete("/project/{project_id}")
+async def delete_project(project_id: str):
+    """Delete a project and its artifacts from the database."""
+    project = await _get_project_or_404(project_id)
+    await store.delete(project_id)
+    return {"deleted": project_id, "idea": project.idea}

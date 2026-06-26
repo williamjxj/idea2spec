@@ -29,6 +29,15 @@ export type Project = {
   prd?: PRD | null;
   architecture?: Architecture | null;
   tasks?: Tasks | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type SaveArtifactsPayload = {
+  business_analysis?: BusinessAnalysis | null;
+  prd?: PRD | null;
+  architecture?: Architecture | null;
+  tasks?: Tasks | null;
 };
 
 /** Same-origin proxy via Next.js rewrites (/api → FastAPI). Override for direct calls. */
@@ -97,6 +106,25 @@ export function getExportZipUrl(projectId: string, format: "markdown" | "html" |
 
 export async function getProject(projectId: string): Promise<Project> {
   return api<Project>(`/project/${projectId}`);
+}
+
+export async function saveProjectArtifacts(
+  projectId: string,
+  payload: SaveArtifactsPayload
+): Promise<{ project: Project; export_path: string }> {
+  return api<{ project: Project; export_path: string }>(`/project/${projectId}/save-artifacts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listProjects(): Promise<Project[]> {
+  return api<Project[]>("/projects");
+}
+
+export async function deleteProject(projectId: string): Promise<{ deleted: string; idea: string }> {
+  return api<{ deleted: string; idea: string }>(`/project/${projectId}`, { method: "DELETE" });
 }
 
 export type SSEHandler = {
