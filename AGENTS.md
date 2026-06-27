@@ -82,11 +82,11 @@ POST  /agent/{name}/{id}             → Project (preview, NOT saved)
 POST  /project/{id}/save-artifacts   → Project (approve & persist)
 POST  /project/{id}/export           → { path, project } (markdown|html|mermaid)
 GET   /project/{id}/export/{fmt}/download  → file download
-POST  /run-all/{id}                  → SSE stream (all 4 agents)
+GET   /project/{id}/run-all           → SSE stream (all 4 agents, native EventSource)
 GET   /health                        → { status: "ok" }
 ```
 
-> **SSE caveat:** The `POST /project/{id}/run-all` SSE endpoint connects **directly** to FastAPI (port 8100), NOT through the Next.js rewrite proxy. Next.js buffers streaming responses, breaking real-time status updates. The frontend's `runAllAgents()` in `apps/web/lib/api.ts` uses `NEXT_PUBLIC_SSE_URL` (default `http://localhost:8100`) to bypass the proxy. Set this in `apps/web/.env.local`. Individual agent buttons (`POST /agent/{name}/{id}`) use the normal proxy path — they return a single JSON response, so buffering is not an issue.
+> **SSE note:** The SSE endpoint is a **GET** request consumed via the native `EventSource` API on the frontend. It routes through the same-origin Next.js rewrite proxy (`/api/project/{id}/run-all`). The proxy does **not** buffer streaming responses — it passes SSE events through in real time. The `NEXT_PUBLIC_SSE_URL` env var is deprecated and no longer needed.
 
 ### LLM routing
 | Agent | Provider | Model (default) | Temperature |

@@ -108,7 +108,7 @@ The `projects/` exported directory continues to be gitignored and lives alongsid
 
 ### 2.1 Backend: SSE endpoint
 
-**`POST /project/{id}/run-all`** — returns `text/event-stream`.
+**`GET /project/{id}/run-all`** — returns `text/event-stream` (native `EventSource` on the frontend).
 
 Event sequence:
 
@@ -237,7 +237,7 @@ The `exports` field is created in the schema and populated on Markdown export (d
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/project/{id}/run-all` | Run all 4 agents, SSE stream |
+| GET | `/project/{id}/run-all` | Run all 4 agents, SSE stream |
 
 ### Modified endpoints
 

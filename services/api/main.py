@@ -38,7 +38,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(title="AI Project CTO", version="0.1.0", lifespan=lifespan)
 
-origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+origins = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in origins],
@@ -137,15 +137,27 @@ async def get_project(project_id: str):
     return await _get_project_or_404(project_id)
 
 
+AGENT_TIMEOUT = 120  # seconds
+
+
 async def _run_agent(project_id: str, agent: AgentName) -> Project:
     """Run a single agent and return the result WITHOUT saving to DB.
 
     The returned project contains the agent output in-memory.  Call
     POST /project/{id}/save-artifacts to persist it.
+    Times out after AGENT_TIMEOUT seconds.
     """
     project = await _get_project_or_404(project_id)
     try:
-        updated = await run_single_agent(agent, project, router)
+        updated = await asyncio.wait_for(
+            run_single_agent(agent, project, router),
+            timeout=AGENT_TIMEOUT,
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=504,
+            detail=f"Agent '{agent}' timed out after {AGENT_TIMEOUT}s — LLM call took too long. Check your API keys and try again.",
+        ) from exc
     except LLMRouterError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return updated
@@ -228,10 +240,11 @@ def _sse_event(event: str, data: object) -> str:
     return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
 
 
-@app.post("/project/{project_id}/run-all")
+@app.get("/project/{project_id}/run-all")
 async def run_all_agents(project_id: str):
     """Run all agents sequentially; yields SSE events but does NOT save to DB.
 
+    Use GET for native EventSource compatibility on the frontend.
     Use POST /project/{id}/save-artifacts after reviewing to persist.
     """
     project = await _get_project_or_404(project_id)
@@ -242,14 +255,26 @@ async def run_all_agents(project_id: str):
         for agent in ALL_AGENTS:
             yield _sse_event("agent_start", {"agent": agent})
             try:
-                project = await run_single_agent(agent, project, router)
+                project = await asyncio.wait_for(
+                    run_single_agent(agent, project, router),
+                    timeout=AGENT_TIMEOUT,
+                )
             except (LLMRouterError, asyncio.TimeoutError) as exc:
                 yield _sse_event("agent_error", {"agent": agent, "error": str(exc)})
                 return
             yield _sse_event("agent_complete", {"agent": agent})
+            await asyncio.sleep(0)  # yield control to event loop between agents
         yield _sse_event("complete", {"project": project.model_dump(mode="json")})
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # nginx: disable buffering
+        },
+    )
 
 
 class SaveArtifactsRequest(BaseModel):

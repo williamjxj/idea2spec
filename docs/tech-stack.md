@@ -339,7 +339,7 @@ apps/web/
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8100` | FastAPI base URL |
-| `NEXT_PUBLIC_SSE_URL` | `http://localhost:8100` | Direct backend URL for SSE streaming (avoids Next.js proxy buffering) |
+| `NEXT_PUBLIC_SSE_URL` | — | Deprecated. The SSE endpoint is now accessed via the same-origin Next.js proxy. |
 
 ---
 
@@ -367,7 +367,7 @@ apps/web/
 | POST | `/project/{id}/save-artifacts` | Approve & persist agent artifacts to SQLite |
 | POST | `/project/{id}/export` | Export workspace (markdown / html / mermaid) |
 | GET | `/project/{id}/export/{format}/download` | Download exported file |
-| POST | `/run-all/{id}` | SSE stream — run all 4 agents sequentially |
+| GET | `/project/{id}/run-all` | SSE stream — run all 4 agents sequentially (native `EventSource`) |
 
 ### Backend layout
 

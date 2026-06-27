@@ -80,6 +80,12 @@ export default function ControlPanel() {
   projectRef.current = project;
   const [agentElapsed, setAgentElapsed] = useState<Record<string, string>>({});
   const agentStartRef = useRef<Record<string, number>>({});
+  const abortRef = useRef<AbortController | null>(null);
+
+  // Cleanup: abort in-flight request on unmount
+  useEffect(() => {
+    return () => abortRef.current?.abort();
+  }, []);
 
   // 1-second tick for elapsed times on running agents
   useEffect(() => {
@@ -148,15 +154,23 @@ export default function ControlPanel() {
     setSavedToDb(false);
     setPipelineRunning(true);
     setPipelineState("running");
-    setAgentStatus(initialPipelineStatus());
+    setAgentStatus({
+      business: "running",
+      product: "running",
+      architect: "running",
+      planner: "running",
+    });
     // Record start times for all agents
     const now = Date.now();
     for (const a of AGENT_ORDER) agentStartRef.current[a] = now;
 
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
     runAllAgents(project.id, {
       onAgentStart(agent) {
-        setAgentStatus((prev) => ({ ...prev, [agent]: "running" }));
-        agentStartRef.current[agent] = Date.now();
+        // Already set to "running" above — this is called when parsing the
+        // SSE response (all agents have already run), so it's a no-op.
       },
       onAgentComplete(agent) {
         setAgentStatus((prev) => ({ ...prev, [agent]: "complete" }));
@@ -166,18 +180,27 @@ export default function ControlPanel() {
         setError(errMsg);
         setPipelineState("partial_failure");
         setPipelineRunning(false);
+        abortRef.current = null;
       },
       onComplete(updated) {
-        setProject(updated);
+        setProject((prev) => prev ? {
+          ...prev,
+          business_analysis: updated.business_analysis ?? prev.business_analysis,
+          prd: updated.prd ?? prev.prd,
+          architecture: updated.architecture ?? prev.architecture,
+          tasks: updated.tasks ?? prev.tasks,
+        } : prev);
         setPipelineState("complete");
         setPipelineRunning(false);
+        abortRef.current = null;
       },
       onError(msg) {
         setError(msg);
         setPipelineState("partial_failure");
         setPipelineRunning(false);
+        abortRef.current = null;
       },
-    });
+    }, ctrl.signal);
   }, [project]);
 
   async function handleCreate() {
@@ -207,7 +230,15 @@ export default function ControlPanel() {
     agentStartRef.current[agent] = Date.now();
     try {
       const p = await runAgent(project.id, agent);
-      setProject(p);
+      // Merge: the individual endpoint only returns THAT agent's output from DB
+      // (which has null for all other agents). Preserve previous outputs.
+      setProject((prev) => prev ? ({
+        ...prev,
+        business_analysis: p.business_analysis ?? prev.business_analysis,
+        prd: p.prd ?? prev.prd,
+        architecture: p.architecture ?? prev.architecture,
+        tasks: p.tasks ?? prev.tasks,
+      }) : prev);
       setAgentStatus((prev) => ({ ...prev, [agent]: "complete" }));
     } catch (e) {
       setAgentStatus((prev) => ({ ...prev, [agent]: "error" }));
@@ -223,17 +254,19 @@ export default function ControlPanel() {
     setPipelineRunning(true);
     setPipelineState("running");
 
-    const p = projectRef.current;
-    if (!p) return;
-
     for (const agent of AGENT_ORDER) {
       const status = agentStatus[agent];
       if (status === "complete") continue;
       setAgentStatus((prev) => ({ ...prev, [agent]: "running" }));
       try {
-        const updated = await runAgent(p.id, agent);
-        setProject(updated);
-        projectRef.current = updated;
+        const updated = await runAgent(project.id, agent);
+        setProject((prev) => prev ? ({
+          ...prev,
+          business_analysis: updated.business_analysis ?? prev.business_analysis,
+          prd: updated.prd ?? prev.prd,
+          architecture: updated.architecture ?? prev.architecture,
+          tasks: updated.tasks ?? prev.tasks,
+        }) : prev);
         setAgentStatus((prev) => ({ ...prev, [agent]: "complete" }));
       } catch (e) {
         setAgentStatus((prev) => ({ ...prev, [agent]: "error" }));
@@ -318,15 +351,17 @@ export default function ControlPanel() {
   const hasArtifacts = project?.business_analysis || project?.prd || project?.architecture || project?.tasks;
 
   return (
-    <div style={styles.container}>
-      <header style={styles.header}>
-        <img src="/logo.svg" alt="AI Project CTO" style={styles.logo} />
-        <p style={styles.subtitle}>
-          Multi-agent workflow — transform an idea into structured project artifacts
-        </p>
-      </header>
+    <div style={styles.outerContainer}>
+      <div style={styles.mainLayout}>
+        <div style={styles.leftCol}>
+          <header style={styles.header}>
+            <img src="/logo.svg" alt="AI Project CTO" style={styles.logo} />
+            <p style={styles.subtitle}>
+              Multi-agent workflow — transform an idea into structured project artifacts
+            </p>
+          </header>
 
-      {/* ── Saved Projects Panel ── */}
+          {/* ── Saved Projects Panel ── */}
       <section style={styles.section}>
         <button
           style={styles.savedProjectsToggle}
@@ -392,14 +427,24 @@ export default function ControlPanel() {
             {savedToDb && <span style={styles.savedBadge}> ✓ Saved</span>}
           </p>
 
-          {/* ── Run All Button ── */}
-          <button
-            style={styles.runAllBtn}
-            onClick={handleRunAll}
-            disabled={isBusy}
-          >
-            {pipelineState === "running" ? "\uD83D\uDD04 Running All\u2026" : "Run All Agents (sequential)"}
-          </button>
+          {/* ── Run All / Cancel Buttons ── */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              style={pipelineRunning ? { ...styles.runAllBtn, opacity: 0.6 } : styles.runAllBtn}
+              onClick={handleRunAll}
+              disabled={isBusy && !pipelineRunning}
+            >
+              {pipelineRunning ? "\uD83D\uDD04 Running All\u2026" : "Run All Agents (sequential)"}
+            </button>
+            {pipelineRunning && (
+              <button
+                style={styles.cancelBtn}
+                onClick={() => { abortRef.current?.abort(); abortRef.current = null; }}
+              >
+                Cancel
+              </button>
+            )}
+          </div>
 
           {/* ── Per-Agent Status Rows (always visible) ── */}
           {AGENT_ORDER.map((key) => {
@@ -529,6 +574,10 @@ export default function ControlPanel() {
 
       {error && <p style={styles.error}>{error}</p>}
 
+        </div>{/* end leftCol */}
+
+        <div style={styles.rightCol}>
+
       {/* ── Project Artifacts ── */}
       {project && (
         <section style={styles.section}>
@@ -595,11 +644,39 @@ export default function ControlPanel() {
           )}
         </section>
       )}
-    </div>
+      </div>{/* end rightCol */}
+    </div>{/* end mainLayout */}
+  </div>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
+  outerContainer: {
+    background: "#0f172a",
+    minHeight: "100vh",
+    color: "#e2e8f0",
+    fontFamily: "system-ui, -apple-system, sans-serif",
+  },
+  mainLayout: {
+    display: "flex",
+    gap: "1.5rem",
+    maxWidth: 1300,
+    margin: "0 auto",
+    padding: "2rem 1.5rem",
+    alignItems: "flex-start",
+  },
+  leftCol: {
+    flex: "0 0 480px",
+    minWidth: 0,
+  },
+  rightCol: {
+    flex: 1,
+    minWidth: 0,
+    position: "sticky" as const,
+    top: "1.5rem",
+    maxHeight: "calc(100vh - 3rem)",
+    overflowY: "auto" as const,
+  },
   container: {
     maxWidth: 900,
     margin: "0 auto",
@@ -648,6 +725,17 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     fontSize: "1.05rem",
     cursor: "pointer",
+  },
+  cancelBtn: {
+    padding: "0.7rem 1.25rem",
+    borderRadius: 8,
+    border: "1px solid #ef4444",
+    background: "transparent",
+    color: "#ef4444",
+    fontWeight: 600,
+    fontSize: "1rem",
+    cursor: "pointer",
+    whiteSpace: "nowrap" as const,
   },
   retryBtn: {
     display: "block",

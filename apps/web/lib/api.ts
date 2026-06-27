@@ -43,14 +43,25 @@ export type SaveArtifactsPayload = {
 
 /** Same-origin proxy via Next.js rewrites (/api → FastAPI). Override for direct calls. */
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api";
-/** Direct backend URL for SSE (avoids Next.js proxy buffering). */
-const SSE_BASE = process.env.NEXT_PUBLIC_SSE_URL ?? "http://localhost:8100";
 
 export type AgentKey = "business" | "product" | "architect" | "planner";
 
 export type PipelineStatus = Record<AgentKey, "pending" | "running" | "complete" | "error">;
 
 export type PipelineState = "idle" | "running" | "complete" | "partial_failure";
+
+/** Try to parse a backend error response body for a clean `detail` message. */
+function _parseErrorBody(text: string): string {
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed.detail === "string") return parsed.detail;
+    if (typeof parsed.detail === "object" && parsed.detail?.msg) return parsed.detail.msg;
+  } catch {
+    // not JSON — use raw text
+  }
+  // Truncate very long error bodies
+  return text.length > 300 ? text.slice(0, 300) + "..." : text;
+}
 
 export function formatApiError(error: unknown): string {
   if (error instanceof TypeError) {
@@ -60,7 +71,7 @@ export function formatApiError(error: unknown): string {
     );
   }
   if (error instanceof Error) {
-    return error.message;
+    return _parseErrorBody(error.message);
   }
   return "Request failed";
 }
@@ -138,92 +149,97 @@ export type SSEHandler = {
   onError?: (error: string) => void;
 };
 
+/**
+ * Quick health check via the same-origin Next.js proxy.
+ */
 async function _checkBackendHealth(): Promise<string | null> {
   try {
-    const resp = await fetch(`${SSE_BASE}/health`, { method: "GET" });
-    if (!resp.ok) return `Backend health check returned status ${resp.status}`;
+    const resp = await fetch("/api/health", { method: "GET" });
+    if (!resp.ok) return `Backend health check returned status ${resp.status}${resp.status === 404 ? " — proxy may not be configured correctly" : ""}`;
     return null;
-  } catch {
-    return "Backend is not reachable. Ensure the API server is running (`make api`).";
+  } catch (err) {
+    const msg = err instanceof TypeError ? err.message : String(err);
+    return `Cannot reach the API: ${msg}. Ensure the backend is running (\`make api\`).`;
   }
 }
 
-export async function runAllAgents(projectId: string, handlers: SSEHandler): Promise<void> {
-  // Quick health check first — gives a more specific error than a generic fetch failure
+/** Run all 4 agents sequentially, calling per-agent status handlers in real time.
+ *
+ * Each agent runs via `POST /api/agent/{name}/{id}` — same endpoint used by
+ * individual agent buttons.  Results are accumulated on the frontend, so
+ * `onComplete` receives a single Project with all 4 artifact fields set.
+ *
+ * If any agent fails the pipeline stops and `onAgentError` is called.
+ * The optional AbortSignal allows the caller to cancel mid-pipeline.
+ */
+const ALL_AGENTS: AgentKey[] = ["business", "product", "architect", "planner"];
+
+const AGENT_CALL_TIMEOUT_MS = 180_000;
+
+export async function runAllAgents(
+  projectId: string,
+  handlers: SSEHandler,
+  signal?: AbortSignal,
+): Promise<void> {
   const healthError = await _checkBackendHealth();
   if (healthError) {
     handlers.onError?.(healthError);
     return;
   }
 
-  let res: Response;
-  try {
-    // Connect directly to backend on port 8100 to avoid Next.js proxy buffering SSE
-    res = await fetch(`${SSE_BASE}/project/${projectId}/run-all`, { method: "POST" });
-  } catch (err) {
-    const msg =
-      err instanceof TypeError
-        ? `Cannot reach the API server (${err.message}). Check that \`make api\` is running on port 8100 and \`apps/web/.env.local\` has NEXT_PUBLIC_SSE_URL set correctly.`
-        : `Cannot reach the API server: ${err}`;
-    handlers.onError?.(msg);
-    return;
-  }
-  if (!res.ok) {
-    handlers.onError?.(`Server error: ${res.status}`);
-    return;
-  }
-  if (!res.body) {
-    handlers.onError?.("Response has no body stream.");
-    return;
-  }
+  let accumulated: Project | null = null;
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-
-      const parts = buffer.split("\n\n");
-      buffer = parts.pop() ?? "";
-
-      for (const part of parts) {
-        const lines = part.split("\n");
-        let eventType = "";
-        let dataStr = "";
-        for (const line of lines) {
-          if (line.startsWith("event: ")) eventType = line.slice(7);
-          if (line.startsWith("data: ")) dataStr = line.slice(6);
-        }
-        if (!eventType || !dataStr) continue;
-
-        try {
-          const data = JSON.parse(dataStr);
-          switch (eventType) {
-            case "agent_start":
-              handlers.onAgentStart?.(data.agent);
-              break;
-            case "agent_complete":
-              handlers.onAgentComplete?.(data.agent);
-              break;
-            case "agent_error":
-              handlers.onAgentError?.(data.agent, data.error);
-              return;
-            case "complete":
-              handlers.onComplete?.(data.project);
-              return;
-          }
-        } catch {
-          // skip malformed events
-        }
-      }
+  for (const agent of ALL_AGENTS) {
+    if (signal?.aborted) {
+      handlers.onError?.("Run All was cancelled.");
+      return;
     }
-  } catch (err) {
-    handlers.onError?.(err instanceof Error ? err.message : "Stream read error");
-  } finally {
-    reader.releaseLock();
+
+    handlers.onAgentStart?.(agent);
+
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), AGENT_CALL_TIMEOUT_MS);
+      if (signal) signal.onabort = () => { ctrl.abort(); clearTimeout(timer); };
+
+      const res = await fetch(`${API_BASE}/agent/${agent}/${projectId}`, {
+        method: "POST",
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        handlers.onAgentError?.(agent, `Server error (${res.status}): ${_parseErrorBody(body)}`);
+        return;
+      }
+
+      const result: Project = await res.json();
+
+      const prev = accumulated as Project | null;
+      accumulated = prev
+        ? {
+            ...prev,
+            business_analysis: result.business_analysis ?? prev.business_analysis,
+            prd: result.prd ?? prev.prd,
+            architecture: result.architecture ?? prev.architecture,
+            tasks: result.tasks ?? prev.tasks,
+          }
+        : result;
+
+      handlers.onAgentComplete?.(agent);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        handlers.onError?.("Run All was cancelled.");
+        return;
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      handlers.onAgentError?.(agent, msg);
+      return;
+    }
+  }
+
+  if (accumulated) {
+    handlers.onComplete?.(accumulated);
   }
 }

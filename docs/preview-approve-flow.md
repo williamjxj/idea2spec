@@ -196,7 +196,7 @@ POST /project/create ───────────────► PostgreSQL
 User clicks "Run All" or individual agent button
        │
        ▼
-POST /run-all (SSE)  or  POST /agent/{name}/{id}
+GET /project/{id}/run-all (SSE, native EventSource)  or  POST /agent/{name}/{id}
        │                                        │
        │  ML agents run (no DB writes)          │
        ▼                                        ▼

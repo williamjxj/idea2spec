@@ -66,7 +66,7 @@ The UI follows a **human-in-the-loop** flow:
 5. **Approve & Save** — explicit click persists all artifacts to the database
 6. **Export** — download as Markdown workspace, HTML report, or Mermaid architecture diagram
 
-> **Note:** SSE streaming connects directly to the backend (port 8100) to avoid Next.js proxy buffering — status updates arrive in real time.
+> **Note:** All requests — including the SSE streaming endpoint — route through the same-origin Next.js rewrite proxy. The proxy passes SSE events through in real time without buffering.
 
 A **Saved Projects** panel lists all persisted projects — load them back for re-review or re-export.
 
@@ -95,7 +95,7 @@ Full architecture: **[docs/tech-stack.md](docs/tech-stack.md)**
 | POST | `/project/{id}/save-artifacts` | Approve & persist agent artifacts |
 | POST | `/project/{id}/export` | Export workspace (markdown / html / mermaid) |
 | GET | `/project/{id}/export/{format}/download` | Download exported file |
-| POST | `/run-all/{id}` | SSE stream — runs all 4 agents sequentially |
+| GET | `/project/{id}/run-all` | SSE stream — runs all 4 agents sequentially (native `EventSource`) |
 | GET | `/health` | Health check |
 
 ## LLM Routing
@@ -122,7 +122,7 @@ Project titles are also LLM-generated (via the fallback router) — your idea "I
 | `MINIMAX_API_KEY` | Yes | — | MiniMax API key |
 | `CORS_ORIGINS` | No | `http://localhost:3000,http://127.0.0.1:3000` | Allowed CORS origins |
 | `DATABASE_PATH` | No | `data/projects.db` | SQLite database path |
-| `NEXT_PUBLIC_SSE_URL` | No | `http://localhost:8100` | Direct backend URL for SSE (avoids proxy buffering) |
+| `BACKEND_URL` | No | `http://127.0.0.1:8100` | FastAPI backend URL for Next.js rewrites |
 
 ## Project Structure
 
