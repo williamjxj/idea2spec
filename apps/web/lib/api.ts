@@ -25,6 +25,7 @@ export type Tasks = {
 export type Project = {
   id: string;
   idea: string;
+  title: string;
   business_analysis?: BusinessAnalysis | null;
   prd?: PRD | null;
   architecture?: Architecture | null;

@@ -42,6 +42,7 @@ class ExportArtifact(BaseModel):
 class Project(BaseModel):
     id: str
     idea: str
+    title: str = ""
     business_analysis: BusinessAnalysis | None = None
     prd: PRD | None = None
     architecture: Architecture | None = None

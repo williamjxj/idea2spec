@@ -28,7 +28,7 @@ async def get_connection() -> aiosqlite.Connection:
 
 
 async def run_migrations() -> None:
-    """Run init_db.sql to ensure the schema exists."""
+    """Run init_db.sql to ensure the schema exists, then apply any ALTER TABLE migrations."""
     conn = await get_connection()
     sql_path = Path(__file__).resolve().parents[2] / "scripts" / "init_db.sql"
     sql = sql_path.read_text()
@@ -37,6 +37,15 @@ async def run_migrations() -> None:
         if stmt:
             await conn.execute(stmt)
     await conn.commit()
+
+    # Add `title` column if it does not exist yet (migration for existing DBs)
+    try:
+        await conn.execute("ALTER TABLE projects ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+        await conn.commit()
+        print("INFO: Added `title` column to projects table (migration)")
+    except Exception:
+        # Column already exists — ignore
+        pass
 
 
 async def close_db() -> None:

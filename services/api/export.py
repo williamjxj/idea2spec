@@ -8,7 +8,8 @@ from packages.schemas import ExportArtifact, ExportFile, Project
 
 def export_project_workspace(project: Project, base_dir: Path | str = "projects") -> Path:
     root = Path(base_dir)
-    slug = slugify(project.idea[:60]) or project.id[:8]
+    slug_base = project.title or project.idea
+    slug = slugify(slug_base[:60]) or project.id[:8]
     out = root / f"{slug}-{project.id[:8]}"
     out.mkdir(parents=True, exist_ok=True)
 

@@ -83,19 +83,21 @@ class ProjectStore:
         await conn.commit()
         return cur
 
-    async def create(self, idea: str) -> Project:
+    async def create(self, idea: str, title: str = "") -> Project:
         project = Project(
             id=str(uuid4()),
             idea=idea,
+            title=title or idea,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
         await self._execute(
-            """INSERT INTO projects (id, idea, business_analysis, prd, architecture, tasks, exports, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO projects (id, idea, title, business_analysis, prd, architecture, tasks, exports, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 project.id,
                 project.idea,
+                project.title,
                 _json_dumps(project.business_analysis),
                 _json_dumps(project.prd),
                 _json_dumps(project.architecture),
@@ -120,11 +122,12 @@ class ProjectStore:
         conn = await db.get_connection()
         await conn.execute(
             """UPDATE projects
-               SET idea = ?, business_analysis = ?, prd = ?, architecture = ?,
+               SET idea = ?, title = ?, business_analysis = ?, prd = ?, architecture = ?,
                    tasks = ?, exports = ?, updated_at = ?
                WHERE id = ?""",
             (
                 project.idea,
+                project.title,
                 _json_dumps(project.business_analysis),
                 _json_dumps(project.prd),
                 _json_dumps(project.architecture),

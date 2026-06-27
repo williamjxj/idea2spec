@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS projects (
     id                TEXT PRIMARY KEY,
     idea              TEXT NOT NULL,
+    title             TEXT NOT NULL DEFAULT '',
     business_analysis TEXT,
     prd               TEXT,
     architecture      TEXT,

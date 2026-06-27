@@ -42,6 +42,14 @@ const AGENT_ICON: Record<string, string> = {
   error: "\u274C",
 };
 
+/** Which LLM drives each agent — shown on buttons for transparency. */
+const AGENT_LLM_INFO: Record<string, { provider: string; model: string; icon: string }> = {
+  business: { provider: "Kimi", model: "kimi-k2.5", icon: "\uD83D\uDD2E" },
+  product: { provider: "DeepSeek", model: "deepseek-v4-pro", icon: "\uD83E\uDDE0" },
+  architect: { provider: "DeepSeek", model: "deepseek-v4-pro", icon: "\uD83C\uDFD7\uFE0F" },
+  planner: { provider: "MiniMax", model: "MiniMax-M2.5", icon: "\uD83D\uDCCB" },
+};
+
 type ExportFormat = "markdown" | "html" | "mermaid";
 
 const EXPORT_FORMATS: { value: ExportFormat; label: string; icon: string }[] = [
@@ -70,6 +78,28 @@ export default function ControlPanel() {
   const [editMode, setEditMode] = useState(false);
   const projectRef = useRef(project);
   projectRef.current = project;
+  const [agentElapsed, setAgentElapsed] = useState<Record<string, string>>({});
+  const agentStartRef = useRef<Record<string, number>>({});
+
+  // 1-second tick for elapsed times on running agents
+  useEffect(() => {
+    const hasRunning = Object.values(agentStatus).includes("running");
+    if (!hasRunning) return;
+    const interval = setInterval(() => {
+      const next: Record<string, string> = {};
+      for (const [agent, status] of Object.entries(agentStatus)) {
+        if (status === "running") {
+          const start = agentStartRef.current[agent];
+          if (start) {
+            const sec = Math.floor((Date.now() - start) / 1000);
+            next[agent] = sec >= 60 ? `${Math.floor(sec / 60)}m${sec % 60}s` : `${sec}s`;
+          }
+        }
+      }
+      setAgentElapsed(next);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [agentStatus]);
 
   const isBusy = loading !== null || pipelineRunning || saving;
 
@@ -119,10 +149,14 @@ export default function ControlPanel() {
     setPipelineRunning(true);
     setPipelineState("running");
     setAgentStatus(initialPipelineStatus());
+    // Record start times for all agents
+    const now = Date.now();
+    for (const a of AGENT_ORDER) agentStartRef.current[a] = now;
 
     runAllAgents(project.id, {
       onAgentStart(agent) {
         setAgentStatus((prev) => ({ ...prev, [agent]: "running" }));
+        agentStartRef.current[agent] = Date.now();
       },
       onAgentComplete(agent) {
         setAgentStatus((prev) => ({ ...prev, [agent]: "complete" }));
@@ -169,10 +203,14 @@ export default function ControlPanel() {
     setLoading(agent);
     setError(null);
     setSavedToDb(false);
+    setAgentStatus((prev) => ({ ...prev, [agent]: "running" }));
+    agentStartRef.current[agent] = Date.now();
     try {
       const p = await runAgent(project.id, agent);
       setProject(p);
+      setAgentStatus((prev) => ({ ...prev, [agent]: "complete" }));
     } catch (e) {
+      setAgentStatus((prev) => ({ ...prev, [agent]: "error" }));
       setError(formatApiError(e));
     } finally {
       setLoading(null);
@@ -306,7 +344,7 @@ export default function ControlPanel() {
               savedProjects.map((sp) => (
                 <div key={sp.id} style={styles.savedProjectItem}>
                   <div style={{ flex: 1, overflow: "hidden" }}>
-                    <span style={styles.savedProjectTitle}>{sp.idea}</span>
+                    <span style={styles.savedProjectTitle}>{sp.title || sp.idea}</span>
                     <span style={styles.savedProjectMeta}>
                       {sp.created_at ? new Date(sp.created_at).toLocaleDateString() : ""}
                       {sp.business_analysis ? " \u2022 agent output saved" : " \u2022 idea only"}
@@ -349,32 +387,47 @@ export default function ControlPanel() {
       {project && (
         <section style={styles.section}>
           <p style={styles.meta}>
-            Project: <strong>{project.idea}</strong>
+            Project: <strong>{project.title || project.idea}</strong>
             &nbsp;|&nbsp;ID: <code>{project.id.slice(0, 8)}</code>
-            {savedToDb && <span style={styles.savedBadge}> \u2713 Saved</span>}
+            {savedToDb && <span style={styles.savedBadge}> ✓ Saved</span>}
           </p>
 
+          {/* ── Run All Button ── */}
           <button
             style={styles.runAllBtn}
             onClick={handleRunAll}
             disabled={isBusy}
           >
-            {pipelineState === "running" ? "Running All\u2026" : "Run All Agents"}
+            {pipelineState === "running" ? "\uD83D\uDD04 Running All\u2026" : "Run All Agents (sequential)"}
           </button>
 
-          {pipelineState !== "idle" && (
-            <div style={styles.pipelineProgress}>
-              {AGENT_ORDER.map((key) => {
-                const status = agentStatus[key];
-                return (
-                  <span key={key} style={styles.pipelineItem}>
-                    <span style={styles.pipelineIcon}>{AGENT_ICON[status]}</span>
-                    <span style={styles.pipelineLabel}>{AGENTS.find((a) => a.key === key)?.label}</span>
-                  </span>
-                );
-              })}
-            </div>
-          )}
+          {/* ── Per-Agent Status Rows (always visible) ── */}
+          {AGENT_ORDER.map((key) => {
+            const status = agentStatus[key];
+            const llm = AGENT_LLM_INFO[key];
+            const elapsed = agentElapsed[key];
+            return (
+              <div key={key} style={styles.agentStatusRow}>
+                <span style={styles.agentStatusIcon}>
+                  {status === "running" ? "\uD83D\uDD04" : AGENT_ICON[status]}
+                </span>
+                <div style={{ flex: 1 }}>
+                  <div style={styles.agentStatusLabel}>
+                    {AGENTS.find((a) => a.key === key)?.label}
+                    {status === "running" && elapsed && (
+                      <span style={styles.elapsedBadge}>{elapsed}</span>
+                    )}
+                    {status === "complete" && <span style={styles.completeBadge}>Done</span>}
+                    {status === "error" && <span style={styles.statusErrorBadge}>Failed</span>}
+                    {(status === "pending" || status === undefined) && <span style={styles.pendingBadge}>Pending</span>}
+                  </div>
+                  <div style={styles.agentStatusLlm}>
+                    {llm.icon} {llm.provider} &middot; {llm.model}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
 
           {pipelineState === "partial_failure" && (
             <button
@@ -386,24 +439,38 @@ export default function ControlPanel() {
             </button>
           )}
 
+          {/* ── Individual Agent Buttons ── */}
           <div style={styles.agentRow}>
-            {AGENTS.map(({ key, label }) => (
-              <button
-                key={key}
-                style={styles.agentBtn}
-                onClick={() => handleRunAgent(key)}
-                disabled={isBusy}
-              >
-                {loading === key ? "Running\u2026" : `Run ${label}`}
-              </button>
-            ))}
+            {AGENTS.map(({ key, label }) => {
+              const llm = AGENT_LLM_INFO[key];
+              return (
+                <button
+                  key={key}
+                  style={styles.agentBtn}
+                  onClick={() => handleRunAgent(key)}
+                  disabled={isBusy}
+                  title={`Uses ${llm.provider} (${llm.model})`}
+                >
+                  {loading === key ? (
+                    <span>{"\uD83D\uDD04"} {agentElapsed[key] || "Running\u2026"}</span>
+                  ) : (
+                    <span>{llm.icon} {label}</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
+          <p style={styles.agentHint}>
+            Run individually to execute one agent at a time, or <strong>Run All</strong> above to
+            run all 4 agents sequentially (Business &rarr; Product &rarr; Architect &rarr; Planner).
+            Re-running an agent replaces its previous output.
+          </p>
 
           {/* ── Preview / Approve Flow ── */}
           {hasArtifacts && !savedToDb && (
             <div style={styles.approveBar}>
               <span style={{ fontSize: "0.85rem", color: "#fbbf24" }}>
-                \u26A0 Preview mode \u2014 artifacts not yet saved to database
+                ⚠ Preview mode — artifacts not yet saved to database
               </span>
               <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
                 <button
@@ -411,7 +478,7 @@ export default function ControlPanel() {
                   onClick={handleSaveToDb}
                   disabled={saving}
                 >
-                  {saving ? "Saving\u2026" : "\u2713 Approve & Save to Database"}
+                  {saving ? "Saving…" : "✓ Approve & Save to Database"}
                 </button>
                 <button
                   style={styles.editBtn}
@@ -427,7 +494,7 @@ export default function ControlPanel() {
           {/* ── Saved confirmation ── */}
           {savedToDb && (
             <div style={styles.savedBar}>
-              <div>\u2713 Artifacts saved to database</div>
+              <div>✓ Artifacts saved to database</div>
               {exportPath && (
                 <div style={{ fontSize: "0.75rem", color: "#94a3b8", marginTop: "0.25rem" }}>
                   Filesystem: <code>{exportPath}</code>
@@ -594,24 +661,63 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     cursor: "pointer",
   },
-  pipelineProgress: {
+  agentStatusRow: {
     display: "flex",
-    gap: "1rem",
-    marginTop: "0.75rem",
-    padding: "0.6rem 0.75rem",
+    alignItems: "center",
+    gap: "0.6rem",
+    marginTop: "0.5rem",
+    padding: "0.5rem 0.75rem",
     borderRadius: 8,
     background: "#1e293b",
     border: "1px solid #334155",
-    justifyContent: "space-around",
   },
-  pipelineItem: {
+  agentStatusIcon: { fontSize: "1.1rem", width: 24, textAlign: "center" as const },
+  agentStatusLabel: {
+    fontSize: "0.85rem",
+    color: "#e2e8f0",
+    fontWeight: 600,
     display: "flex",
-    flexDirection: "column" as const,
     alignItems: "center",
-    gap: "0.25rem",
+    gap: "0.5rem",
   },
-  pipelineIcon: { fontSize: "1.25rem" },
-  pipelineLabel: { fontSize: "0.7rem", color: "#94a3b8", textAlign: "center" as const },
+  agentStatusLlm: {
+    fontSize: "0.7rem",
+    color: "#64748b",
+    marginTop: "0.15rem",
+  },
+  elapsedBadge: {
+    fontSize: "0.7rem",
+    padding: "0.1rem 0.4rem",
+    borderRadius: 4,
+    background: "#1e3a5f",
+    color: "#60a5fa",
+    fontWeight: 500,
+  },
+  completeBadge: {
+    fontSize: "0.65rem",
+    padding: "0.1rem 0.4rem",
+    borderRadius: 4,
+    background: "#064e3b",
+    color: "#34d399",
+    fontWeight: 600,
+  },
+  statusErrorBadge: {
+    fontSize: "0.65rem",
+    padding: "0.1rem 0.4rem",
+    borderRadius: 4,
+    background: "#450a0a",
+    color: "#f87171",
+    fontWeight: 600,
+  },
+  pendingBadge: {
+    fontSize: "0.65rem",
+    padding: "0.1rem 0.4rem",
+    borderRadius: 4,
+    background: "#1e293b",
+    color: "#64748b",
+    fontWeight: 500,
+    border: "1px solid #334155",
+  },
   agentRow: { display: "flex", flexWrap: "wrap", gap: "0.5rem", marginTop: "0.75rem" },
   agentBtn: {
     padding: "0.5rem 1rem",
@@ -620,6 +726,12 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#1e293b",
     color: "#e2e8f0",
     cursor: "pointer",
+  },
+  agentHint: {
+    marginTop: "0.5rem",
+    fontSize: "0.72rem",
+    color: "#64748b",
+    lineHeight: 1.4,
   },
   exportRow: {
     display: "flex",

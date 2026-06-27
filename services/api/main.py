@@ -19,6 +19,7 @@ from services.api import db
 from services.api.export import export_project_html, export_project_workspace, generate_architecture_mermaid
 from services.api.store import store
 from services.llm_router import LLMRouter, LLMRouterError
+from services.llm_router.config import TaskType
 
 load_dotenv()
 
@@ -76,7 +77,59 @@ async def health():
 async def create_project(body: CreateProjectRequest):
     if not body.idea.strip():
         raise HTTPException(status_code=400, detail="Idea cannot be empty")
-    return await store.create(body.idea.strip())
+    project = await store.create(body.idea.strip())
+
+    # Generate a concise title from the idea using the LLM
+    try:
+        title = await _generate_project_title(project.idea, router)
+        project.title = title
+        await store.save(project)
+    except Exception:
+        # Fallback: extract a readable title heuristically
+        project.title = _extract_project_title(project.idea)
+        await store.save(project)
+
+    return project
+
+
+async def _generate_project_title(idea: str, router_: LLMRouter) -> str:
+    """Use the fallback LLM to produce a short, professional project name."""
+    prompt = (
+        "Generate a concise, professional project title (maximum 40 characters, "
+        "3-6 words preferred) from the idea below. "
+        "Return ONLY the title — no quotes, no explanation, no markdown.\n\n"
+        f'Idea: "{idea}"\nTitle:'
+    )
+    system = "You are a naming assistant. Output ONLY the title, nothing else."
+    try:
+        text = await router_._chat(TaskType.FALLBACK, system, prompt, retry_on_parse_error=False)
+        text = text.strip().strip('"').strip("'").strip(".").strip()
+        if 2 <= len(text) <= 60:
+            return text
+    except Exception:
+        pass
+    return _extract_project_title(idea)
+
+
+def _extract_project_title(idea: str) -> str:
+    """Heuristic fallback: strip common lead-in phrases and capitalize."""
+    import re
+    title = idea.strip()
+    patterns = [
+        r"^i\s+(want\s+to\s+)?(build|create|make|develop|design)\s+(a\s+|an\s+|the\s+)?",
+        r"^i\s+need\s+(a\s+|an\s+|the\s+)?",
+        r"^can\s+you\s+(help\s+(me\s+)?)?(build|create|make)\s+(a\s+|an\s+|the\s+)?",
+        r"^let'?s?\s+(build|create|make)\s+(a\s+|an\s+|the\s+)?",
+        r"^create\s+(a\s+|an\s+|the\s+)?",
+        r"^build\s+(a\s+|an\s+|the\s+)?",
+    ]
+    for pattern in patterns:
+        title = re.sub(pattern, "", title, flags=re.IGNORECASE).strip()
+    if not title:
+        title = idea
+    # Capitalize first letter
+    title = title[0].upper() + title[1:] if title else idea
+    return title
 
 
 @app.get("/project/{project_id}", response_model=Project)
