@@ -138,13 +138,34 @@ export type SSEHandler = {
   onError?: (error: string) => void;
 };
 
+async function _checkBackendHealth(): Promise<string | null> {
+  try {
+    const resp = await fetch(`${SSE_BASE}/health`, { method: "GET" });
+    if (!resp.ok) return `Backend health check returned status ${resp.status}`;
+    return null;
+  } catch {
+    return "Backend is not reachable. Ensure the API server is running (`make api`).";
+  }
+}
+
 export async function runAllAgents(projectId: string, handlers: SSEHandler): Promise<void> {
+  // Quick health check first — gives a more specific error than a generic fetch failure
+  const healthError = await _checkBackendHealth();
+  if (healthError) {
+    handlers.onError?.(healthError);
+    return;
+  }
+
   let res: Response;
   try {
     // Connect directly to backend on port 8100 to avoid Next.js proxy buffering SSE
     res = await fetch(`${SSE_BASE}/project/${projectId}/run-all`, { method: "POST" });
-  } catch {
-    handlers.onError?.("Cannot reach the API server.");
+  } catch (err) {
+    const msg =
+      err instanceof TypeError
+        ? `Cannot reach the API server (${err.message}). Check that \`make api\` is running on port 8100 and \`apps/web/.env.local\` has NEXT_PUBLIC_SSE_URL set correctly.`
+        : `Cannot reach the API server: ${err}`;
+    handlers.onError?.(msg);
     return;
   }
   if (!res.ok) {
