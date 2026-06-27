@@ -1,4 +1,4 @@
-.PHONY: install test api web cli db
+.PHONY: install test api web cli db reset
 
 db:
 	docker run -d --name ai-project-cto-db \
@@ -22,3 +22,6 @@ web:
 
 cli:
 	PYTHONPATH=. venv/bin/python scripts/cli.py "$(IDEA)" --export
+
+reset:
+	bash scripts/reset.sh -f

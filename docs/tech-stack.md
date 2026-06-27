@@ -339,6 +339,7 @@ apps/web/
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8100` | FastAPI base URL |
+| `NEXT_PUBLIC_SSE_URL` | `http://localhost:8100` | Direct backend URL for SSE streaming (avoids Next.js proxy buffering) |
 
 ---
 
@@ -380,6 +381,7 @@ packages/
   prompts/          # Agent system prompts
 scripts/
   cli.py            # Terminal pipeline (create → agents → export)
+  reset.sh          # Clean reset — wipes SQLite DB and exported workspaces
 ```
 
 ---

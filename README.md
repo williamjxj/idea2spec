@@ -29,8 +29,9 @@ Or use the Makefile:
 
 ```bash
 make install       # full install (venv + pip + npm)
-make api           # start backend
-make web           # start frontend
+make api           # start backend (port 8100)
+make web           # start frontend (port 3000)
+make reset         # wipe DB + projects (see scripts/reset.sh)
 ```
 
 ## CLI Pipeline
@@ -53,11 +54,19 @@ The CLI also supports `make cli IDEA="..."`.
 
 The UI follows a **human-in-the-loop** flow:
 
-1. **Create Project** — enters your idea, creates a DB record
-2. **Run Agents** — click individual agent buttons or "Run All" — results appear in a **preview pane**, NOT saved to DB
-3. **Review & Edit** — browse structured views (Business → PRD → Architecture → Tasks) or switch to **Raw JSON** to edit directly
-4. **Approve & Save** — explicit click persists all artifacts to the database
-5. **Export** — download as Markdown workspace, HTML report, or Mermaid architecture diagram
+1. **Create Project** — enter your idea, gets an LLM-generated title automatically
+2. **Run Agents** — click individual agent buttons or **Run All** — results appear in a **preview pane**, NOT saved to DB
+3. **Live Status Tracking** — each agent row shows real-time status badges:
+   - ⏳ **Pending** — waiting to run
+   - 🔄 **Running** — with live elapsed timer (e.g. `12s`, `1m5s`)
+   - ✅ **Done** — completed successfully
+   - ❌ **Failed** — error occurred
+   - Each row also displays which LLM provider powers that agent (Kimi/DeepSeek/MiniMax + model name)
+4. **Review & Edit** — browse structured views (Business → PRD → Architecture → Tasks) or switch to **Raw JSON** to edit directly
+5. **Approve & Save** — explicit click persists all artifacts to the database
+6. **Export** — download as Markdown workspace, HTML report, or Mermaid architecture diagram
+
+> **Note:** SSE streaming connects directly to the backend (port 8100) to avoid Next.js proxy buffering — status updates arrive in real time.
 
 A **Saved Projects** panel lists all persisted projects — load them back for re-review or re-export.
 
@@ -102,15 +111,18 @@ Full architecture: **[docs/tech-stack.md](docs/tech-stack.md)**
 If a provider's API key is missing, the router falls back to DeepSeek.
 JSON parse failures trigger one automatic retry with a fix prompt.
 
+Project titles are also LLM-generated (via the fallback router) — your idea "I want to build a habit tracker" becomes "Daily Habit Tracker" automatically.
+
 ## Environment Variables
 
-| Variable | Required | Default |
-|----------|----------|---------|
-| `DEEPSEEK_API_KEY` | Yes | — |
-| `KIMI_API_KEY` | Yes | — |
-| `MINIMAX_API_KEY` | Yes | — |
-| `CORS_ORIGINS` | No | `http://localhost:3000,http://127.0.0.1:3000` |
-| `DATABASE_PATH` | No | `data/projects.db` |
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DEEPSEEK_API_KEY` | Yes | — | DeepSeek API key |
+| `KIMI_API_KEY` | Yes | — | Kimi/Moonshot API key |
+| `MINIMAX_API_KEY` | Yes | — | MiniMax API key |
+| `CORS_ORIGINS` | No | `http://localhost:3000,http://127.0.0.1:3000` | Allowed CORS origins |
+| `DATABASE_PATH` | No | `data/projects.db` | SQLite database path |
+| `NEXT_PUBLIC_SSE_URL` | No | `http://localhost:8100` | Direct backend URL for SSE (avoids proxy buffering) |
 
 ## Project Structure
 
@@ -138,6 +150,30 @@ data/                     SQLite database (gitignored)
 projects/                 Exported workspaces (gitignored)
 tests/                    Pytest suite (12 tests)
 ```
+
+## Clean Reset
+
+To wipe all data and start fresh:
+
+```bash
+bash scripts/reset.sh        # with confirmation prompt
+bash scripts/reset.sh -f     # force reset, no prompt
+make reset                   # same as -f
+```
+
+This deletes `data/projects.db` and the `projects/` directory, then restarts the backend to auto-create a fresh database.
+
+## Clean Reset
+
+To wipe all data and start fresh:
+
+```bash
+bash scripts/reset.sh        # with confirmation prompt
+bash scripts/reset.sh -f     # force reset, no prompt
+make reset                   # same as -f
+```
+
+This deletes `data/projects.db` and the `projects/` directory, then restarts the backend to auto-create a fresh database.
 
 ## Testing
 

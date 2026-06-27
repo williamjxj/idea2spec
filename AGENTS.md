@@ -24,6 +24,9 @@ make web                        # cd apps/web && npm run dev
 # Run tests (backend only)
 make test                       # PYTHONPATH=. venv/bin/pytest tests/ -q
 
+# Clean reset — wipes DB + projects directory
+make reset                      # bash scripts/reset.sh -f
+
 # CLI pipeline (create → agents → export)
 make cli IDEA="I want to build AI Resume SaaS"
 # Or manually:
@@ -59,6 +62,7 @@ services/llm_router/          config.py (env → provider routing), router.py (a
 packages/schemas/project.py   Pydantic models — source of truth for data shape
 packages/prompts/agents.py    System prompts telling each LLM to return JSON only
 scripts/cli.py                Terminal entrypoint — inline sys.path hack
+scripts/reset.sh              Clean reset — wipes SQLite DB and project exports
 apps/web/                     Next.js (no CSS framework, inline styles only)
 ```
 
@@ -81,6 +85,8 @@ GET   /project/{id}/export/{fmt}/download  → file download
 POST  /run-all/{id}                  → SSE stream (all 4 agents)
 GET   /health                        → { status: "ok" }
 ```
+
+> **SSE caveat:** The `POST /project/{id}/run-all` SSE endpoint connects **directly** to FastAPI (port 8100), NOT through the Next.js rewrite proxy. Next.js buffers streaming responses, breaking real-time status updates. The frontend's `runAllAgents()` in `apps/web/lib/api.ts` uses `NEXT_PUBLIC_SSE_URL` (default `http://localhost:8100`) to bypass the proxy. Set this in `apps/web/.env.local`. Individual agent buttons (`POST /agent/{name}/{id}`) use the normal proxy path — they return a single JSON response, so buffering is not an issue.
 
 ### LLM routing
 | Agent | Provider | Model (default) | Temperature |

@@ -43,6 +43,8 @@ export type SaveArtifactsPayload = {
 
 /** Same-origin proxy via Next.js rewrites (/api → FastAPI). Override for direct calls. */
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api";
+/** Direct backend URL for SSE (avoids Next.js proxy buffering). */
+const SSE_BASE = process.env.NEXT_PUBLIC_SSE_URL ?? "http://localhost:8100";
 
 export type AgentKey = "business" | "product" | "architect" | "planner";
 
@@ -139,7 +141,8 @@ export type SSEHandler = {
 export async function runAllAgents(projectId: string, handlers: SSEHandler): Promise<void> {
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}/project/${projectId}/run-all`, { method: "POST" });
+    // Connect directly to backend on port 8100 to avoid Next.js proxy buffering SSE
+    res = await fetch(`${SSE_BASE}/project/${projectId}/run-all`, { method: "POST" });
   } catch {
     handlers.onError?.("Cannot reach the API server.");
     return;

@@ -14,7 +14,11 @@ All core MVP features are complete. The project has progressed beyond the initia
 | SQLite persistence (aiosqlite) | ✅ Working — survives restarts |
 | Preview-&-Approve flow | ✅ Agents run without auto-save; explicit approve step |
 | Project list / load / delete | ✅ Saved Projects panel in UI + `GET /projects` + `DELETE /project/{id}` |
-| Run-all-agents UI | ✅ SSE stream + individual agent buttons |
+| Run-all-agents UI | ✅ SSE stream with live status badges, elapsed timers, LLM provider info |
+| Per-agent status tracking | ✅ Status rows show Pending / Running+elapsed timer / Done / Failed |
+| SSE direct connection | ✅ SSE bypasses Next.js proxy via `NEXT_PUBLIC_SSE_URL` to avoid buffering |
+| LLM-powered project titles | ✅ Auto-generated titles (e.g. "build a habit tracker" → "Daily Habit Tracker") |
+| Clean reset script | ✅ `scripts/reset.sh` wipes DB + projects (`make reset`) |
 | Editable JSON preview | ✅ Raw JSON editor before approving |
 | Export formats | ✅ Markdown workspace + HTML report + Mermaid architecture diagram |
 | CLI pipeline | ✅ Linear LangGraph pipeline; supports `--agents` filter |
@@ -43,6 +47,10 @@ Configure via `.env`: `KIMI_API_KEY`, `DEEPSEEK_API_KEY`, `MINIMAX_API_KEY`.
 ### 🟢 Completed in v0.2
 
 - [x] **Run-all-agents UI** — SSE stream in the ControlPanel; individual agent buttons too
+- [x] **Per-agent status tracking** — live badges (Pending/Running+elapsed/Done/Failed) with LLM info
+- [x] **SSE direct connection** — bypasses Next.js proxy buffering for real-time status updates
+- [x] **LLM-powered project titles** — auto-generated from idea text
+- [x] **Clean reset** — `scripts/reset.sh` wipes DB + projects (`make reset`)
 - [x] **Persistence** — SQLite via aiosqlite; projects survive restarts (see `data/projects.db`)
 - [x] **Project list** — Saved Projects panel with load/delete
 - [x] **End-to-end validation** — create → all 4 agents → approve → export

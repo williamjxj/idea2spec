@@ -9,6 +9,8 @@ Three bugs were reported in the agent pipeline:
 | 1 | WebUI/CLI stuck on "Run All" — no progress updates | LLM HTTP timeout (60 s) too short for long-running model responses | Increased timeout to **300 s** |
 | 2 | Agent output saved **directly** to PostgreSQL with no human review | `_run_agent()` and `/run-all` called `store.save()` immediately after each agent | Removed auto-save; introduced explicit **"Approve & Save to Database"** step |
 | 3 | No UI to view or manage existing DB records | No `GET /projects` endpoint; no frontend panel | Added list/delete endpoints + collapsible **Saved Projects** panel |
+| 4 | SSE streaming blocked by Next.js proxy buffering | Next.js rewrites buffer streaming responses, so status rows never update in real time | `runAllAgents()` connects directly to backend port 8100 via `NEXT_PUBLIC_SSE_URL` env var |
+| 5 | No visual status feedback during Run All | Agents ran silently — all rows stayed "Pending" until completion | Added per-agent status badges (⏳→🔄→✅/❌) with live elapsed timer + LLM provider info |
 
 ---
 
@@ -18,8 +20,11 @@ Three bugs were reported in the agent pipeline:
 |------|------|--------|
 | `services/api/main.py` | Backend | Removed auto-save from agents; added 3 new endpoints |
 | `services/llm_router/router.py` | Backend | HTTP timeout 60 s → 300 s |
-| `apps/web/lib/api.ts` | Frontend | New types + API functions |
-| `apps/web/components/ControlPanel.tsx` | Frontend | Preview bar, editable JSON, saved-projects panel |
+| `apps/web/lib/api.ts` | Frontend | New types + API functions + SSE direct connection |
+| `apps/web/components/ControlPanel.tsx` | Frontend | Preview bar, editable JSON, saved-projects panel, status badges/elapsed timers |
+| `apps/web/env.example` | Frontend | Added `NEXT_PUBLIC_SSE_URL` env var |
+| `scripts/reset.sh` | Tooling | Clean reset — wipes SQLite DB + exported workspaces |
+| `Makefile` | Tooling | Added `make reset` target |
 
 ---
 
