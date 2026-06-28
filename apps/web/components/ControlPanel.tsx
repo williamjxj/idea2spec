@@ -127,8 +127,17 @@ export default function ControlPanel() {
     try {
       const p = await getProject(projectId);
       setProject(p);
-      setPipelineState("idle");
-      setAgentStatus(initialPipelineStatus());
+      setIdea(p.idea); // Show original idea in the textarea
+      // Derive agent status from loaded artifacts
+      const status = initialPipelineStatus();
+      if (p.business_analysis && p.business_analysis.market) status.business = "complete";
+      if (p.prd && (p.prd.features.length > 0 || p.prd.user_stories.length > 0)) status.product = "complete";
+      if (p.architecture && p.architecture.frontend) status.architect = "complete";
+      if (p.tasks && (p.tasks.epics.length > 0 || p.tasks.issues.length > 0)) status.planner = "complete";
+      setAgentStatus(status);
+      // Derive pipeline state from completeness
+      const completeCount = Object.values(status).filter((s) => s === "complete").length;
+      setPipelineState(completeCount === 4 ? "complete" : completeCount > 0 ? "partial_failure" : "idle");
       setSavedToDb(true);
       setExportPath(null);
       setError(null);
@@ -142,6 +151,17 @@ export default function ControlPanel() {
   const handleDeleteProject = useCallback(async (projectId: string) => {
     try {
       await deleteProject(projectId);
+      // If we deleted the currently loaded project, clear it
+      if (projectRef.current?.id === projectId) {
+        setProject(null);
+        setIdea("");
+        setAgentStatus(initialPipelineStatus());
+        setPipelineState("idle");
+        setSavedToDb(false);
+        setExportPath(null);
+        setError(null);
+        setEditMode(false);
+      }
       await fetchSavedProjects();
     } catch (e) {
       setError(formatApiError(e));
@@ -154,23 +174,21 @@ export default function ControlPanel() {
     setSavedToDb(false);
     setPipelineRunning(true);
     setPipelineState("running");
+    // Start all as pending — onAgentStart sets each to "running" one at a time
     setAgentStatus({
-      business: "running",
-      product: "running",
-      architect: "running",
-      planner: "running",
+      business: "pending",
+      product: "pending",
+      architect: "pending",
+      planner: "pending",
     });
-    // Record start times for all agents
-    const now = Date.now();
-    for (const a of AGENT_ORDER) agentStartRef.current[a] = now;
 
     const ctrl = new AbortController();
     abortRef.current = ctrl;
 
     runAllAgents(project.id, {
       onAgentStart(agent) {
-        // Already set to "running" above — this is called when parsing the
-        // SSE response (all agents have already run), so it's a no-op.
+        agentStartRef.current[agent] = Date.now();
+        setAgentStatus((prev) => ({ ...prev, [agent]: "running" }));
       },
       onAgentComplete(agent) {
         setAgentStatus((prev) => ({ ...prev, [agent]: "complete" }));
@@ -195,8 +213,18 @@ export default function ControlPanel() {
         abortRef.current = null;
       },
       onError(msg) {
-        setError(msg);
-        setPipelineState("partial_failure");
+        // Reset any still-"running" agents back to pending on cancel/error
+        setAgentStatus((prev) => {
+          const next = { ...prev };
+          for (const a of AGENT_ORDER) {
+            if (next[a] === "running") next[a] = "pending";
+          }
+          return next;
+        });
+        // Distinguish user cancel from pipeline error
+        const cancelled = msg.includes("cancelled");
+        setPipelineState(cancelled ? "idle" : "partial_failure");
+        setError(cancelled ? null : msg);
         setPipelineRunning(false);
         abortRef.current = null;
       },
@@ -240,6 +268,12 @@ export default function ControlPanel() {
         tasks: p.tasks ?? prev.tasks,
       }) : prev);
       setAgentStatus((prev) => ({ ...prev, [agent]: "complete" }));
+      // Sync pipelineState based on how many agents are now complete.
+      // (agentStatus is pre-update, so we count "complete" for others + this agent.)
+      const newCompleteCount =
+        AGENT_ORDER.filter((a) => a === agent || agentStatus[a] === "complete").length;
+      if (newCompleteCount === 4) setPipelineState("complete");
+      else if (newCompleteCount > 0) setPipelineState("partial_failure");
     } catch (e) {
       setAgentStatus((prev) => ({ ...prev, [agent]: "error" }));
       setError(formatApiError(e));
@@ -253,6 +287,15 @@ export default function ControlPanel() {
     setError(null);
     setPipelineRunning(true);
     setPipelineState("running");
+
+    // Reset all non-complete agents to "pending" before retrying
+    setAgentStatus((prev) => {
+      const next = { ...prev };
+      for (const a of AGENT_ORDER) {
+        if (next[a] !== "complete") next[a] = "pending";
+      }
+      return next;
+    });
 
     for (const agent of AGENT_ORDER) {
       const status = agentStatus[agent];
@@ -422,9 +465,18 @@ export default function ControlPanel() {
       {project && (
         <section style={styles.section}>
           <p style={styles.meta}>
-            Project: <strong>{project.title || project.idea}</strong>
-            &nbsp;|&nbsp;ID: <code>{project.id.slice(0, 8)}</code>
-            {savedToDb && <span style={styles.savedBadge}> ✓ Saved</span>}
+            <strong>{project.title || project.idea}</strong>
+            {project.title && project.title !== project.idea && (
+              <span style={{ color: "#64748b", fontSize: "0.8rem" }}>
+                {" "}— <span style={{ color: "#94a3b8" }}>original idea:</span> "
+                {project.idea.length > 80 ? project.idea.slice(0, 80) + "…" : project.idea}"
+              </span>
+            )}
+            <br />
+            <span style={{ fontSize: "0.75rem", color: "#475569" }}>
+              ID: <code style={{ fontSize: "0.75rem" }}>{project.id.slice(0, 8)}</code>
+              {savedToDb && <span style={styles.savedBadge}> ✓ Saved</span>}
+            </span>
           </p>
 
           {/* ── Run All / Cancel Buttons ── */}

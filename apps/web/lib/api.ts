@@ -197,16 +197,32 @@ export async function runAllAgents(
 
     handlers.onAgentStart?.(agent);
 
+    let timedOut = false;
+
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), AGENT_CALL_TIMEOUT_MS);
-      if (signal) signal.onabort = () => { ctrl.abort(); clearTimeout(timer); };
+      const timer = setTimeout(() => {
+        timedOut = true;
+        ctrl.abort();
+      }, AGENT_CALL_TIMEOUT_MS);
+
+      // Wire up external cancel signal — use addEventListener so it doesn't
+      // overwrite across iterations
+      const onExternalAbort = () => {
+        clearTimeout(timer);
+        ctrl.abort();
+      };
+      if (signal) {
+        signal.addEventListener("abort", onExternalAbort, { once: true });
+      }
 
       const res = await fetch(`${API_BASE}/agent/${agent}/${projectId}`, {
         method: "POST",
         signal: ctrl.signal,
       });
       clearTimeout(timer);
+      // Remove listener to avoid leaks if the external signal fires later
+      if (signal) signal.removeEventListener("abort", onExternalAbort);
 
       if (!res.ok) {
         const body = await res.text().catch(() => "");
@@ -230,7 +246,14 @@ export async function runAllAgents(
       handlers.onAgentComplete?.(agent);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
-        handlers.onError?.("Run All was cancelled.");
+        if (timedOut) {
+          handlers.onAgentError?.(
+            agent,
+            `Agent '${agent}' timed out after ${AGENT_CALL_TIMEOUT_MS / 1000}s`,
+          );
+        } else {
+          handlers.onError?.("Run All was cancelled.");
+        }
         return;
       }
       const msg = err instanceof Error ? err.message : String(err);
