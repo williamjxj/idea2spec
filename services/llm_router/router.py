@@ -12,13 +12,58 @@ class LLMRouterError(Exception):
 
 
 def _extract_json(text: str) -> dict[str, Any]:
+    """Extract a JSON object from LLM output.
+
+    Handles common failure modes:
+      - Text preamble before the JSON (e.g. "好的，这是分析结果：\\n{...}")
+      - Text postamble after the JSON (e.g. "{...}\\n希望这个分析对您有帮助！")
+      - Markdown code fences with or without ``json`` tag
+      - ``<think>`` reasoning blocks (MiniMax, DeepSeek)
+      - Plain JSON with surrounding whitespace
+
+    Strategy:
+      1. Strip ``<think>`` blocks
+      2. Try markdown fence extraction
+      3. Try brace-delimited extraction (first ``{`` to last ``}``)
+      4. Fall back to raw parse
+    """
+    original = text
     text = text.strip()
-    # Strip reasoning tags some models (MiniMax, DeepSeek) add before the actual output
+
+    # 1. Strip reasoning tags some models (MiniMax, DeepSeek) add
     text = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
+
+    # 2. Try markdown code fences
     fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
     if fence:
         text = fence.group(1).strip()
-    return json.loads(text)
+
+    # 3. Primary parse attempt — handles clean JSON and fence-extracted JSON
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # 4. Brace-delimited extraction — handles preambles and postambles.
+    #    Find the first '{' and the last '}', extract everything between.
+    #    This is the standard approach for LLM JSON extraction
+    #    (cf. LangChain's parse_json_markdown, llama.cpp's json-schema-mode).
+    first_brace = text.find("{")
+    last_brace = text.rfind("}")
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        candidate = text[first_brace : last_brace + 1]
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+
+    # 5. Last resort — try the original raw text (after think-stripping)
+    #    in case the model returned valid JSON with unusual delimiters
+    raise json.JSONDecodeError(
+        f"Could not extract valid JSON from: {original[:300]}...",
+        original,
+        0,
+    )
 
 
 class LLMRouter:
@@ -40,8 +85,9 @@ class LLMRouter:
             if not retry_on_parse_error:
                 raise LLMRouterError(f"Invalid JSON from LLM: {raw[:500]}") from exc
             fix_prompt = (
-                f"Your previous response was not valid JSON. "
-                f"Return ONLY valid JSON with no markdown fences.\n\nPrevious response:\n{raw}"
+                "Your last output was NOT valid JSON and could not be parsed. "
+                "You MUST output ONLY a JSON object — start with {, end with }. "
+                "NO preamble, NO explanation, NO markdown, NO text outside the braces."
             )
             raw = await self._chat(task, system_prompt, fix_prompt, retry_on_parse_error=False)
             try:

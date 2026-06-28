@@ -30,7 +30,7 @@ class LLMSettings(BaseSettings):
 def get_provider_config(task: TaskType, settings: LLMSettings) -> tuple[str, str, str, float]:
     """Return (api_key, base_url, model, temperature) for the given task type."""
     routing = {
-        TaskType.BUSINESS: ("kimi", settings.kimi_api_key, settings.kimi_base_url, settings.kimi_model, 1.0),
+        TaskType.BUSINESS: ("kimi", settings.kimi_api_key, settings.kimi_base_url, settings.kimi_model, 0.5),
         TaskType.PRODUCT: ("deepseek", settings.deepseek_api_key, settings.deepseek_base_url, settings.deepseek_model, 0.3),
         TaskType.ARCHITECTURE: ("deepseek", settings.deepseek_api_key, settings.deepseek_base_url, settings.deepseek_model, 0.3),
         TaskType.PLANNER: ("minimax", settings.minimax_api_key, settings.minimax_base_url, settings.minimax_model, 0.3),
